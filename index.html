@@ -1,18 +1,287 @@
-void executeShot(uint8_t houseID) {
-  if (delayValue > 0) delay((int)(delayValue * 1000)); // Main Delay (D)
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Voice Skeet Puller V5</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial; text-align: center; margin-top: 15px; background: #222; color: white;}
+        .top-btn { padding: 12px; font-size: 18px; margin: 5px; border-radius: 8px; width: 40%; font-weight: bold; border:none;}
+        
+        /* Arming Panel */
+        #arm-panel { display: flex; justify-content: center; margin: 10px 5%; flex-wrap: wrap; }
+        .arm-btn { 
+            flex: 1 1 18%; padding: 12px 2px; margin: 3px; font-size: 18px; font-weight: bold;
+            background: #444; color: white; border: 2px solid #222; border-radius: 8px;
+        }
+        .arm-btn.active { background: #e74c3c; border-color: #ffeb3b; color: white;} 
+        #arm-status { font-size: 22px; font-weight: bold; color: #aaa; margin-top: 5px; min-height: 25px;}
+        
+        /* Delay Controls */
+        .delay-row { display: flex; justify-content: space-between; align-items: center; margin: 5px 5%; background: #333; padding: 8px 15px; border-radius: 8px; }
+        .delay-label { font-size: 16px; font-weight: bold;}
+        .delay-btn { background: #555; color: white; border: none; padding: 8px 18px; font-size: 20px; border-radius: 5px; font-weight: bold;}
+        .delay-val { font-size: 18px; font-weight: bold; width: 50px; display: inline-block; text-align: center;}
+        
+        .dr-btn { background: #444; color: white; border: 2px solid #222; padding: 10px; border-radius: 8px; font-weight: bold; font-size: 16px; width: 90%; margin: 5px auto;}
+        
+        /* Volume / Sliders */
+        #vol-bar-container { width: 90%; height: 20px; background: #444; margin: 10px auto; border-radius: 10px; overflow: hidden; }
+        #vol-bar { width: 0%; height: 100%; background: #0f0; transition: width 0.1s; }
+        #threshVal { font-size: 14px; font-weight: bold; color: #ffeb3b; } /* Font size reduced */
+        #log { margin-top: 10px; color: #0f0; text-align: left; padding: 10px; font-size: 13px; background: #111; height: 150px; overflow-y: scroll; border: 1px solid #444;}
+    </style>
+</head>
+<body>
 
-  switch(houseID) {
-    case 0: fireRF(OUT_HIGH_PIN); break;
-    case 1: fireRF(OUT_LOW_PIN); break;
-    case 2: // D1H (High then Low)
-        fireRF(OUT_HIGH_PIN);
-        if (doublesValue > 0) delay((int)(doublesValue * 1000)); // Doubles Delay (DD)
-        fireRF(OUT_LOW_PIN);
-        break;
-    case 3: // D1L (Reverse: Low then High)
-        fireRF(OUT_LOW_PIN);
-        if (doublesValue > 0) delay((int)(doublesValue * 1000)); // Doubles Delay (DD)
-        fireRF(OUT_HIGH_PIN);
-        break;
-  }
-}
+    <h2>Voice Puller V5</h2>
+    
+    <div>
+        <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
+        <button id="listenBtn" class="top-btn" style="background: #28A745; color: white;">Turn On Mic</button>
+    </div>
+    
+    <!-- Arming Status -->
+    <div id="arm-status">SAFE / DISARMED</div>
+
+    <!-- Mode Buttons -->
+    <div id="arm-panel">
+        <button id="btn-H" class="arm-btn" onclick="setMode('H')">H</button>
+        <button id="btn-L" class="arm-btn" onclick="setMode('L')">L</button>
+        <button id="btn-D" class="arm-btn" onclick="setMode('D')">D</button>
+        <button id="btn-HL" class="arm-btn" onclick="setMode('HL')">HL</button>
+        <button id="btn-T" class="arm-btn" onclick="setMode('T')">T (H)</button>
+    </div>
+
+    <!-- Delay Controls -->
+    <div class="delay-row">
+        <span class="delay-label">Delay (D):</span>
+        <div>
+            <button class="delay-btn" onclick="adjDelay('D', -0.1)">-</button>
+            <span class="delay-val" id="val-D">0.0s</span>
+            <button class="delay-btn" onclick="adjDelay('D', 0.1)">+</button>
+        </div>
+    </div>
+    <div class="delay-row">
+        <span class="delay-label">Dbl Dly (DD):</span>
+        <div>
+            <button class="delay-btn" onclick="adjDelay('DD', -0.1)">-</button>
+            <span class="delay-val" id="val-DD">0.0s</span>
+            <button class="delay-btn" onclick="adjDelay('DD', 0.1)">+</button>
+        </div>
+    </div>
+    
+    <!-- Doubles Reverse Toggle -->
+    <button id="btn-DR" class="dr-btn" onclick="toggleDR()">DR: OFF (Normal Sequence)</button>
+
+    <!-- Mic Volume -->
+    <div id="vol-bar-container"><div id="vol-bar"></div></div>
+    
+    <label for="threshSlider" style="font-size: 14px;">Trigger Sensitivity: <span id="threshVal">50</span></label><br>
+    <input type="range" id="threshSlider" min="5" max="150" value="50" style="width: 80%; margin-top: 5px;">
+
+    <div id="log">--- Debug Log ---<br></div>
+
+<script>
+    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+    const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+    let bleCharacteristic;
+    
+    let isCoolingDown = false;
+    let threshold = 50;
+    let audioContext;
+    
+    let armedMode = null;   
+    let hlStep = 0;         
+    let lastHouse = 'H';    
+
+    // Delay variables
+    let dVal = 0.0;
+    let ddVal = 0.0;
+    let isDR = false; // Doubles Reverse state
+
+    function logMsg(msg) {
+        const logDiv = document.getElementById('log');
+        logDiv.innerHTML = msg + "<br>" + logDiv.innerHTML;
+    }
+
+    document.getElementById('threshSlider').oninput = function() {
+        threshold = this.value;
+        document.getElementById('threshVal').innerText = threshold;
+    }
+
+    // --- DELAY ADJUSTMENTS ---
+    window.adjDelay = function(type, amt) {
+        if (type === 'D') {
+            dVal = Math.max(0, dVal + amt);
+            document.getElementById('val-D').innerText = dVal.toFixed(1) + "s";
+            sendBLECmd("D" + dVal.toFixed(1)); // Send D setting to ESP32
+        } else {
+            ddVal = Math.max(0, ddVal + amt);
+            document.getElementById('val-DD').innerText = ddVal.toFixed(1) + "s";
+            sendBLECmd("DD" + ddVal.toFixed(1)); // Send DD setting to ESP32
+        }
+    };
+
+    window.toggleDR = function() {
+        isDR = !isDR;
+        const btn = document.getElementById('btn-DR');
+        if (isDR) {
+            btn.innerText = "DR: ON (High then Low)";
+            btn.style.background = "#e74c3c";
+        } else {
+            btn.innerText = "DR: OFF (Normal Sequence)";
+            btn.style.background = "#444";
+        }
+    };
+
+    // --- ARMING LOGIC ---
+    window.setMode = function(mode) {
+        if (armedMode === mode) {
+            armedMode = null;
+        } else {
+            armedMode = mode;
+        }
+        hlStep = 0; 
+        
+        document.querySelectorAll('.arm-btn').forEach(btn => btn.classList.remove('active'));
+        if (armedMode) document.getElementById('btn-' + armedMode).classList.add('active');
+        
+        const as = document.getElementById('arm-status');
+        if (!armedMode) {
+            as.innerText = "SAFE / DISARMED";
+            as.style.color = "#aaa";
+        } else {
+            as.style.color = "#ff4444";
+            if (armedMode === 'HL') as.innerText = "ARMED: High -> Low";
+            else if (armedMode === 'T') as.innerText = "REPEATING: " + lastHouse;
+            else as.innerText = "ARMED: " + armedMode;
+        }
+    };
+
+    // --- BLE CONNECTION ---
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+        try {
+            logMsg("Searching for BLUE Puller...");
+            const device = await navigator.bluetooth.requestDevice({
+                filters:[{ name: 'BLUE Puller' }],
+                optionalServices:[SERVICE_UUID]
+            });
+            const server = await device.gatt.connect();
+            const service = await server.getPrimaryService(SERVICE_UUID);
+            bleCharacteristic = await service.getCharacteristic(CHAR_RX_UUID);
+            
+            document.getElementById('connectBtn').innerText = "BLE Connected 🟢";
+            document.getElementById('connectBtn').style.background = "#28A745";
+            logMsg("BLE Connected successfully.");
+        } catch (error) {
+            logMsg("BLE Error: " + error);
+        }
+    });
+
+    // --- MIC LOGIC ---
+    document.getElementById('listenBtn').addEventListener('click', async () => {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioContext = new window.AudioContext();
+            if (audioContext.state === 'suspended') await audioContext.resume();
+            
+            if (audioContext.state !== 'running') {
+                logMsg("ERROR: iOS Audio Engine failed to start.");
+                return;
+            }
+
+            document.getElementById('listenBtn').innerText = "Mic Active 🎤";
+            logMsg("Mic successfully activated!");
+
+            const analyser = audioContext.createAnalyser();
+            const microphone = audioContext.createMediaStreamSource(stream);
+            analyser.fftSize = 256;
+            microphone.connect(analyser);
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+            function checkVolume() {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for(let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                let averageVolume = sum / dataArray.length;
+                
+                document.getElementById('vol-bar').style.width = Math.min(100, (averageVolume / 1.5)) + "%";
+
+                if (averageVolume > threshold && !isCoolingDown) {
+                    processVoiceTrigger(averageVolume);
+                }
+                requestAnimationFrame(checkVolume);
+            }
+            checkVolume();
+        } catch (err) {
+            logMsg("Mic Error: " + (err.message || err));
+        }
+    });
+
+    // --- FIRING LOGIC ---
+    async function processVoiceTrigger(vol) {
+        if (!armedMode) return; 
+
+        isCoolingDown = true;
+        document.getElementById('vol-bar').style.background = "#f00"; 
+        
+        let cmdToSend = '';
+
+        if (armedMode === 'H' || armedMode === 'L') {
+            cmdToSend = armedMode;
+            lastHouse = armedMode;
+            setMode(null); // Auto-Disarm
+        } 
+        else if (armedMode === 'D') {
+            // Apply DR (Reverse) logic
+            // If DR is ON, send D1H (High then Low). If OFF, send D1L (Low then High) or whatever your standard is.
+            cmdToSend = isDR ? 'D1H' : 'D1L'; 
+            lastHouse = cmdToSend;
+            setMode(null);
+        }
+        else if (armedMode === 'HL') {
+            if (hlStep === 0) {
+                cmdToSend = 'H';
+                lastHouse = 'H';
+                hlStep = 1; 
+                document.getElementById('arm-status').innerText = "ARMED: Now Pulling Low";
+            } else {
+                cmdToSend = 'L';
+                lastHouse = 'L';
+                setMode(null); 
+            }
+        } 
+        else if (armedMode === 'T') {
+            cmdToSend = lastHouse; 
+        }
+
+        document.getElementById('btn-T').innerText = "T (" + lastHouse + ")";
+        logMsg("💥 LOUD NOISE (Vol: " + Math.round(vol) + ")");
+        
+        if (cmdToSend !== '') {
+            await sendBLECmd(cmdToSend);
+        }
+
+        setTimeout(() => {
+            isCoolingDown = false;
+            document.getElementById('vol-bar').style.background = "#0f0";
+        }, 2000);
+    }
+
+    async function sendBLECmd(cmd) {
+        if (bleCharacteristic) {
+            try {
+                let encoder = new TextEncoder('utf-8');
+                await bleCharacteristic.writeValue(encoder.encode(cmd));
+                logMsg("🚀 SENT BLE: '" + cmd + "'");
+            } catch (err) {
+                logMsg("BLE Send Failed: " + err);
+            }
+        } else {
+            logMsg("⚠️ Offline. Would send: " + cmd);
+        }
+    }
+</script>
+</body>
+</html>
