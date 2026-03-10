@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Voice Skeet Puller V6</title>
+    <title>Voice Skeet Puller V7</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: Arial; text-align: center; margin-top: 15px; background: #222; color: white;}
         
         /* Row 1: Top Buttons */
-        .top-btn { padding: 12px; font-size: 18px; margin: 5px; border-radius: 8px; width: 40%; font-weight: bold; border:none;}
+        .top-btn { padding: 12px; font-size: 18px; margin: 5px; border-radius: 8px; width: 40%; font-weight: bold; border:none; cursor: pointer; transition: background 0.3s;}
         
         /* Arming Status */
         #arm-status { font-size: 20px; font-weight: bold; color: #aaa; margin: 8px 0; min-height: 24px;}
@@ -19,9 +19,9 @@
             background: #444; color: white; border: 2px solid #222; border-radius: 8px; cursor: pointer;
         }
         .arm-btn.active { background: #e74c3c; border-color: #ffeb3b; color: white;} 
-        .cancel-btn { background: #8b0000; color: #fff; border-color: #ff4444; flex: 1 1 30%; } /* Distinct Cancel Button */
+        .cancel-btn { background: #8b0000; color: #fff; border-color: #ff4444; flex: 1 1 30%; }
         
-        /* Row 3: Delay Controls (Minimized Height) */
+        /* Row 3: Delay Controls */
         .delay-row { display: flex; justify-content: space-between; align-items: center; margin: 6px 5%; background: #333; padding: 4px 12px; border-radius: 8px; }
         .delay-label { font-size: 15px; font-weight: bold;}
         .delay-btn { background: #555; color: white; border: none; padding: 6px 16px; font-size: 18px; border-radius: 5px; font-weight: bold; cursor: pointer;}
@@ -31,7 +31,7 @@
         #vol-bar-container { width: 90%; height: 18px; background: #444; margin: 10px auto; border-radius: 9px; overflow: hidden; }
         #vol-bar { width: 0%; height: 100%; background: #0f0; transition: width 0.1s; }
         #threshLabel { font-size: 14px; }
-        #threshVal { font-size: 13px; font-weight: bold; color: #ffeb3b; } /* Font size reduced */
+        #threshVal { font-size: 13px; font-weight: bold; color: #ffeb3b; }
         
         /* Debug Log */
         #log { margin-top: 10px; color: #0f0; text-align: left; padding: 8px; font-size: 12px; background: #111; height: 150px; overflow-y: scroll; border: 1px solid #444;}
@@ -39,7 +39,7 @@
 </head>
 <body>
 
-    <h2>Voice Puller V6</h2>
+    <h2>Voice Puller V7</h2>
     
     <div>
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -60,7 +60,7 @@
         <button id="btn-CANCEL" class="arm-btn cancel-btn" onclick="cancelMode()">CANCEL</button>
     </div>
 
-    <!-- Delay Controls (Row 3 - Minimized) -->
+    <!-- Delay Controls (Row 3) -->
     <div class="delay-row">
         <span class="delay-label">Delay (D):</span>
         <div>
@@ -87,13 +87,21 @@
     <div id="log">--- Debug Log ---<br></div>
 
 <script>
+    // BLE Configuration
     const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
     const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
-    let bleCharacteristic;
     
+    // Global State Variables
+    let bleDevice;
+    let bleCharacteristic;
+    let isBleConnected = false;
+
+    let audioContext;
+    let audioStream;
+    let animId;
+    let isMicActive = false;
     let isCoolingDown = false;
     let threshold = 50;
-    let audioContext;
     
     let armedMode = null;   
     let hlStep = 0;         
@@ -141,7 +149,7 @@
     // --- ARMING LOGIC ---
     window.setMode = function(mode) {
         if (armedMode === mode) {
-            armedMode = null; // Toggle off if clicked again
+            armedMode = null; 
         } else {
             armedMode = mode;
         }
@@ -162,30 +170,67 @@
         }
     };
 
-    // --- BLE CONNECTION ---
+    // --- BLE CONNECTION TOGGLE ---
     document.getElementById('connectBtn').addEventListener('click', async () => {
+        // Disconnect Logic
+        if (isBleConnected) {
+            if (bleDevice && bleDevice.gatt.connected) {
+                bleDevice.gatt.disconnect();
+            }
+            return;
+        }
+
+        // Connect Logic
         try {
             logMsg("Searching for BLUE Puller...");
-            const device = await navigator.bluetooth.requestDevice({
+            bleDevice = await navigator.bluetooth.requestDevice({
                 filters:[{ name: 'BLUE Puller' }],
                 optionalServices:[SERVICE_UUID]
             });
-            const server = await device.gatt.connect();
+            
+            // Listen for unexpected disconnects
+            bleDevice.addEventListener('gattserverdisconnected', handleBleDisconnect);
+            
+            const server = await bleDevice.gatt.connect();
             const service = await server.getPrimaryService(SERVICE_UUID);
             bleCharacteristic = await service.getCharacteristic(CHAR_RX_UUID);
             
-            document.getElementById('connectBtn').innerText = "BLE Connected 🟢";
-            document.getElementById('connectBtn').style.background = "#28A745";
+            isBleConnected = true;
+            document.getElementById('connectBtn').innerText = "Disconnect BLE";
+            document.getElementById('connectBtn').style.background = "#dc3545"; // Red
             logMsg("BLE Connected successfully.");
         } catch (error) {
             logMsg("BLE Error: " + error);
         }
     });
 
-    // --- MIC LOGIC ---
+    function handleBleDisconnect() {
+        isBleConnected = false;
+        bleCharacteristic = null;
+        document.getElementById('connectBtn').innerText = "Connect BLE";
+        document.getElementById('connectBtn').style.background = "#007BFF"; // Blue back to default
+        logMsg("BLE Disconnected.");
+    }
+
+    // --- MIC TOGGLE LOGIC ---
     document.getElementById('listenBtn').addEventListener('click', async () => {
+        // Mute / Turn Off Logic
+        if (isMicActive) {
+            if (audioStream) audioStream.getTracks().forEach(track => track.stop()); // Kills hardware mic
+            if (audioContext && audioContext.state !== 'closed') audioContext.close();
+            if (animId) cancelAnimationFrame(animId);
+            
+            isMicActive = false;
+            document.getElementById('listenBtn').innerText = "Turn On Mic";
+            document.getElementById('listenBtn').style.background = "#28A745"; // Green
+            document.getElementById('vol-bar').style.width = "0%";
+            logMsg("Mic Muted.");
+            return;
+        }
+
+        // Turn On Logic
         try {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             window.AudioContext = window.AudioContext || window.webkitAudioContext;
             audioContext = new window.AudioContext();
             if (audioContext.state === 'suspended') await audioContext.resume();
@@ -195,11 +240,13 @@
                 return;
             }
 
-            document.getElementById('listenBtn').innerText = "Mic Active 🎤";
+            isMicActive = true;
+            document.getElementById('listenBtn').innerText = "Mute Mic 🎤";
+            document.getElementById('listenBtn').style.background = "#dc3545"; // Red indicating it's "Hot"
             logMsg("Mic successfully activated!");
 
             const analyser = audioContext.createAnalyser();
-            const microphone = audioContext.createMediaStreamSource(stream);
+            const microphone = audioContext.createMediaStreamSource(audioStream);
             analyser.fftSize = 256;
             microphone.connect(analyser);
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
@@ -212,10 +259,10 @@
                 
                 document.getElementById('vol-bar').style.width = Math.min(100, (averageVolume / 1.5)) + "%";
 
-                if (averageVolume > threshold && !isCoolingDown) {
+                if (averageVolume > threshold && !isCoolingDown && isMicActive) {
                     processVoiceTrigger(averageVolume);
                 }
-                requestAnimationFrame(checkVolume);
+                animId = requestAnimationFrame(checkVolume);
             }
             checkVolume();
         } catch (err) {
@@ -261,7 +308,6 @@
         } 
         else if (armedMode === 'T') {
             cmdToSend = lastHouse; 
-            // Check if T is repeating a compound mode, translate to correct BLE command
             if (cmdToSend === 'D') cmdToSend = 'D1H';
             if (cmdToSend === 'DR') cmdToSend = 'D1L';
         }
@@ -276,11 +322,11 @@
         setTimeout(() => {
             isCoolingDown = false;
             document.getElementById('vol-bar').style.background = "#0f0";
-        }, 2000); // 2 Second cooldown between shots
+        }, 2000); 
     }
 
     async function sendBLECmd(cmd) {
-        if (bleCharacteristic) {
+        if (bleCharacteristic && isBleConnected) {
             try {
                 let encoder = new TextEncoder('utf-8');
                 await bleCharacteristic.writeValue(encoder.encode(cmd));
