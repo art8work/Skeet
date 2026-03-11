@@ -212,7 +212,7 @@
         let decoder = new TextDecoder('utf-8');
         let msg = decoder.decode(event.target.value).trim();
         
-        logMsg("📡 [TRAP]: " + msg); // Log everything the trap says
+        logMsg("📡 [HOUSE]: " + msg); // Log everything the trap says
 
         // If another phone (or this one) changes a setting, update the UI!
         if (msg.includes("Delay Set:")) {
@@ -369,4 +369,5 @@
 </script>
 </body>
 </html>
+
 
