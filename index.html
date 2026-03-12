@@ -1,50 +1,53 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Voice Skeet Puller V9</title>
+    <title>Skeet Puller V10</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: Arial; text-align: center; margin-top: 15px; background: #222; color: white;}
         
-        /* Row 1: Top Buttons */
-        .top-row { display: flex; justify-content: center; gap: 6px; margin: 5px 2%; }
+        /* Top Buttons Grid */
+        .top-row { display: flex; justify-content: center; gap: 8px; margin: 8px 3%; }
         .top-btn { flex: 1; padding: 12px 2px; font-size: 16px; border-radius: 8px; font-weight: bold; border:none; cursor: pointer; transition: background 0.3s;}
         
         /* Arming Status */
-        #arm-status { font-size: 20px; font-weight: bold; color: #aaa; margin: 8px 0; min-height: 24px;}
+        #arm-status { font-size: 20px; font-weight: bold; color: #aaa; margin: 10px 0; min-height: 24px;}
         
-        /* Row 2: Arming Panel */
-        #arm-panel { display: flex; justify-content: center; margin: 8px 2%; flex-wrap: wrap; gap: 4px; }
+        /* Arming Panel */
+        #arm-panel { display: flex; justify-content: center; margin: 8px 2%; flex-wrap: wrap; gap: 5px; }
         .arm-btn { 
-            flex: 1 1 20%; padding: 10px 0px; font-size: 16px; font-weight: bold;
+            flex: 1 1 20%; padding: 12px 0px; font-size: 16px; font-weight: bold;
             background: #444; color: white; border: 2px solid #222; border-radius: 8px; cursor: pointer;
         }
         .arm-btn.active { background: #e74c3c; border-color: #ffeb3b; color: white;} 
         .cancel-btn { background: #8b0000; color: #fff; border-color: #ff4444; flex: 1 1 30%; }
         
-        /* Row 3: Delay Controls */
-        .delay-row { display: flex; justify-content: space-between; align-items: center; margin: 6px 5%; background: #333; padding: 4px 12px; border-radius: 8px; }
+        /* Delay Controls */
+        .delay-row { display: flex; justify-content: space-between; align-items: center; margin: 8px 5%; background: #333; padding: 6px 12px; border-radius: 8px; }
         .delay-label { font-size: 15px; font-weight: bold;}
         .delay-btn { background: #555; color: white; border: none; padding: 6px 16px; font-size: 18px; border-radius: 5px; font-weight: bold; cursor: pointer;}
         .delay-val { font-size: 16px; font-weight: bold; width: 45px; display: inline-block; text-align: center; color: #00d2ff;}
         
         /* Volume / Sliders */
-        #vol-bar-container { width: 90%; height: 18px; background: #444; margin: 10px auto; border-radius: 9px; overflow: hidden; }
+        #vol-bar-container { width: 90%; height: 18px; background: #444; margin: 12px auto; border-radius: 9px; overflow: hidden; }
         #vol-bar { width: 0%; height: 100%; background: #0f0; transition: width 0.1s; }
         #threshLabel { font-size: 14px; }
         #threshVal { font-size: 13px; font-weight: bold; color: #ffeb3b; }
         
         /* Debug Log */
-        #log { margin-top: 10px; color: #0f0; text-align: left; padding: 8px; font-size: 12px; background: #111; height: 150px; overflow-y: scroll; border: 1px solid #444;}
+        #log { margin-top: 15px; color: #0f0; text-align: left; padding: 8px; font-size: 12px; background: #111; height: 150px; overflow-y: scroll; border: 1px solid #444;}
     </style>
 </head>
 <body>
 
-    <h2>Voice Puller V9</h2>
+    <h2>Voice Puller V10</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
         <button id="listenBtn" class="top-btn" style="background: #28A745; color: white;">Turn On Mic</button>
+    </div>
+    <div class="top-row">
+        <button id="vmBtn" class="top-btn" style="background: #9b59b6; color: white;">Mode: VOICE</button>
         <button id="syncBtn" class="top-btn" style="background: #17a2b8; color: white;">Sync: ON</button>
     </div>
     
@@ -96,7 +99,9 @@
     let isCoolingDown = false;
     let threshold = 50;
     
-    let isSyncEnabled = true; // Toggle for Squad Sync
+    let isSyncEnabled = true; 
+    let isVoiceMode = true; // Default to Voice Mode
+    
     let armedMode = null;   
     let hlStep = 0;         
     let lastHouse = 'H';    
@@ -114,7 +119,7 @@
         document.getElementById('threshVal').innerText = threshold;
     }
 
-    // --- SYNC TOGGLE ---
+    // --- TOGGLE BUTTONS ---
     document.getElementById('syncBtn').addEventListener('click', () => {
         isSyncEnabled = !isSyncEnabled;
         const btn = document.getElementById('syncBtn');
@@ -127,6 +132,30 @@
         }
         logMsg(isSyncEnabled ? "Squad Sync ENABLED." : "Squad Sync DISABLED. Running isolated.");
     });
+
+    document.getElementById('vmBtn').addEventListener('click', () => {
+        setVoiceMode(!isVoiceMode, false);
+    });
+
+    function setVoiceMode(voiceEnabled, fromSync = false) {
+        isVoiceMode = voiceEnabled;
+        const btn = document.getElementById('vmBtn');
+        if (isVoiceMode) {
+            btn.innerText = "Mode: VOICE";
+            btn.style.background = "#9b59b6"; // Purple
+            if (!fromSync) logMsg("Switched to VOICE mode.");
+        } else {
+            btn.innerText = "Mode: MANUAL";
+            btn.style.background = "#fd7e14"; // Orange
+            if (!fromSync) logMsg("Switched to MANUAL mode.");
+            cancelMode(true); // Clear any pending armed status
+        }
+        updateArmUI();
+
+        if (!fromSync && isBleConnected && isSyncEnabled) {
+            sendBLECmd(isVoiceMode ? "MODE:VOICE" : "MODE:MANUAL", true);
+        }
+    }
 
     // --- DELAY ADJUSTMENTS ---
     window.adjDelay = function(type, amt) {
@@ -143,9 +172,17 @@
     // --- UI UPDATERS ---
     function updateArmUI() {
         document.querySelectorAll('.arm-btn').forEach(btn => btn.classList.remove('active'));
+        const as = document.getElementById('arm-status');
+        
+        if (!isVoiceMode) {
+            as.innerText = "MANUAL MODE (Tap to Fire)";
+            as.style.color = "#fd7e14";
+            document.getElementById('btn-T').innerText = "T (" + lastHouse + ")";
+            return;
+        }
+
         if (armedMode) document.getElementById('btn-' + armedMode).classList.add('active');
         
-        const as = document.getElementById('arm-status');
         if (!armedMode) {
             as.innerText = "SAFE / DISARMED";
             as.style.color = "#aaa";
@@ -162,26 +199,49 @@
         armedMode = null;
         hlStep = 0;
         updateArmUI();
-        if (!fromSync) logMsg("🚫 Sequence Cancelled. System SAFE.");
-        
-        if (!fromSync && isBleConnected && isSyncEnabled) {
-            sendBLECmd("MODE:CANCEL", true); // True = Silent log
-        }
+        if (!fromSync) logMsg(isVoiceMode ? "🚫 Sequence Cancelled. System SAFE." : "🔄 Sequence Reset.");
+        if (!fromSync && isBleConnected && isSyncEnabled) sendBLECmd("MODE:CANCEL", true); 
     };
 
     window.setMode = function(mode, fromSync = false) {
+        // --- MANUAL MODE BEHAVIOR (Instant Fire) ---
+        if (!isVoiceMode && !fromSync) {
+            let cmdToSend = '';
+            if (mode === 'H' || mode === 'L') { cmdToSend = mode; hlStep = 0; }
+            else if (mode === 'D') { cmdToSend = 'D1H'; hlStep = 0; }
+            else if (mode === 'DR') { cmdToSend = 'D1L'; hlStep = 0; }
+            else if (mode === 'HL') {
+                if (hlStep === 0) { cmdToSend = 'H'; hlStep = 1; }
+                else { cmdToSend = 'L'; hlStep = 0; }
+            }
+            else if (mode === 'T') {
+                cmdToSend = lastHouse;
+                if (cmdToSend === 'D') cmdToSend = 'D1H';
+                if (cmdToSend === 'DR') cmdToSend = 'D1L';
+            }
+
+            if (cmdToSend !== '') {
+                sendBLECmd(cmdToSend);
+                // Flash button for visual feedback
+                const btn = document.getElementById('btn-' + mode);
+                btn.classList.add('active');
+                setTimeout(() => btn.classList.remove('active'), 200);
+            }
+            return;
+        }
+
+        // --- VOICE MODE BEHAVIOR (Arming) ---
         if (!fromSync) {
-            if (armedMode === mode) armedMode = null; // Toggle off if user clicks active button
+            if (armedMode === mode) armedMode = null; 
             else armedMode = mode;
         } else {
-            armedMode = mode; // Force mode if coming from Squad Sync
+            armedMode = mode; 
         }
         
         hlStep = 0; 
         updateArmUI();
 
-        // Broadcast change to squad
-        if (!fromSync && isBleConnected && isSyncEnabled) {
+        if (!fromSync && isBleConnected && isSyncEnabled && isVoiceMode) {
             let syncMsg = armedMode ? "MODE:" + armedMode + ":" + lastHouse : "MODE:CANCEL";
             sendBLECmd(syncMsg, true); 
         }
@@ -230,27 +290,32 @@
     // --- NOTIFICATION HANDLER (Receives Squad Broadcasts) ---
     function handleBleNotifications(event) {
         let msg = new TextDecoder('utf-8').decode(event.target.value).trim();
-        
-        // Ignore echo loop artifacts
         if (msg === "" || msg.startsWith("Err: Unknown")) return;
 
-        // Mode Sync Handling
+        // Sync Modes across devices
         if (msg.startsWith("MODE:")) {
-            if (!isSyncEnabled) return; // Ignore if user isolated their phone
+            if (!isSyncEnabled) return; 
             
+            if (msg === "MODE:VOICE") { setVoiceMode(true, true); return; }
+            if (msg === "MODE:MANUAL") { setVoiceMode(false, true); return; }
+
             let parts = msg.split(":");
             let syncedMode = parts[1];
-            if (parts[2]) lastHouse = parts[2]; // Update T-mode memory
+            if (parts[2]) lastHouse = parts[2]; 
             
-            if (syncedMode === "CANCEL") {
-                cancelMode(true);
-            } else {
-                setMode(syncedMode, true);
-            }
+            if (syncedMode === "CANCEL") cancelMode(true);
+            else setMode(syncedMode, true);
             return; 
         }
 
         logMsg("📡 [TRAP]: " + msg);
+
+        // Auto-update 'lastHouse' so 'T' mode is always accurate for everyone
+        if (msg === "CMD: High") lastHouse = 'H';
+        else if (msg === "CMD: Low") lastHouse = 'L';
+        else if (msg === "CMD: D1H" || msg === "CMD: Doubles") lastHouse = 'D';
+        else if (msg === "CMD: D1L") lastHouse = 'DR';
+        updateArmUI();
 
         // Delay Sync Handling
         if (isSyncEnabled) {
@@ -311,7 +376,7 @@
                 
                 document.getElementById('vol-bar').style.width = Math.min(100, (averageVolume / 1.5)) + "%";
 
-                if (averageVolume > threshold && !isCoolingDown && isMicActive) {
+                if (averageVolume > threshold && !isCoolingDown && isMicActive && isVoiceMode) {
                     processVoiceTrigger(averageVolume);
                 }
                 animId = requestAnimationFrame(checkVolume);
@@ -332,7 +397,7 @@
         if (armedMode === 'H' || armedMode === 'L') {
             cmdToSend = armedMode;
             lastHouse = armedMode;
-            cancelMode(false); // Sends CANCEL to squad automatically
+            cancelMode(false); 
         } 
         else if (armedMode === 'D') {
             cmdToSend = 'D1H'; 
@@ -367,7 +432,6 @@
         
         if (cmdToSend !== '') await sendBLECmd(cmdToSend);
 
-        // DELAY BETWEEN SHOTS CHANGED TO 500ms
         setTimeout(() => {
             isCoolingDown = false;
             document.getElementById('vol-bar').style.background = "#0f0";
