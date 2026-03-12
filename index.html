@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Voice Skeet Puller V12</title>
+    <title>Voice Skeet Puller V13</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: Arial; text-align: center; margin-top: 15px; background: #222; color: white;}
@@ -13,7 +13,7 @@
         /* Arming Status */
         #arm-status { font-size: 18px; font-weight: bold; color: #aaa; margin: 10px 0; min-height: 24px;}
         
-        /* Arming Panel (8 Buttons = 2 Rows of 4) */
+        /* Arming Panel (8 Buttons) */
         #arm-panel { display: flex; justify-content: center; margin: 8px 2%; flex-wrap: wrap; gap: 6px; }
         .arm-btn { 
             flex: 1 1 22%; padding: 12px 0px; font-size: 16px; font-weight: bold;
@@ -40,7 +40,7 @@
 </head>
 <body>
 
-    <h2>Voice Puller V12</h2>
+    <h2>Voice Puller V13</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -97,6 +97,7 @@
 
     let audioContext, audioStream, animId;
     let isMicActive = false;
+    let wasMicActiveBeforeSleep = false;
     let isCoolingDown = false;
     let threshold = 50;
     
@@ -156,14 +157,21 @@
         }
     }
 
+    // --- DELAY ADJUSTMENTS (FIXED FOR SYNC OFF) ---
     window.adjDelay = function(type, amt) {
-        if (!isBleConnected) return;
+        if (!isBleConnected) {
+            logMsg("⚠️ Connect BLE to change delay.");
+            return;
+        }
+        // Update local variable and UI immediately, bypassing the Sync requirement
         if (type === 'D') {
-            let temp = Math.max(0, dVal + amt);
-            sendBLECmd("D" + temp.toFixed(1)); 
+            dVal = Math.max(0, dVal + amt);
+            document.getElementById('val-D').innerText = dVal.toFixed(1) + "s";
+            sendBLECmd("D" + dVal.toFixed(1)); 
         } else {
-            let temp = Math.max(0, ddVal + amt);
-            sendBLECmd("DD" + temp.toFixed(1)); 
+            ddVal = Math.max(0, ddVal + amt);
+            document.getElementById('val-DD').innerText = ddVal.toFixed(1) + "s";
+            sendBLECmd("DD" + ddVal.toFixed(1)); 
         }
     };
 
@@ -172,13 +180,12 @@
         document.querySelectorAll('.arm-btn').forEach(btn => btn.classList.remove('active'));
         const as = document.getElementById('arm-status');
         
-        // Instantly Update T button label based on lastHouse
         document.getElementById('btn-T').innerText = "T (" + lastHouse + ")";
 
         if (!isVoiceMode) {
             as.innerText = "MANUAL MODE (Tap to Fire)";
             if (lastHouse === 'HL') as.innerText += `[HL: Next is ${hlStep === 0 ? 'High' : 'Low'}]`;
-            if (lastHouse === 'LH') as.innerText += ` [LH: Next is ${hlStep === 0 ? 'Low' : 'High'}]`;
+            if (lastHouse === 'LH') as.innerText += `[LH: Next is ${hlStep === 0 ? 'Low' : 'High'}]`;
             as.style.color = "#fd7e14";
             return;
         }
@@ -213,10 +220,8 @@
     };
 
     window.setMode = function(mode, fromSync = false) {
-        // --- MANUAL MODE (Instant Fire) ---
         if (!isVoiceMode && !fromSync) {
             let cmdToSend = '';
-            
             if (mode === 'H' || mode === 'L') { cmdToSend = mode; hlStep = 0; lastHouse = mode; }
             else if (mode === 'D') { cmdToSend = 'D1H'; hlStep = 0; lastHouse = 'D'; }
             else if (mode === 'DR') { cmdToSend = 'D1L'; hlStep = 0; lastHouse = 'DR'; }
@@ -231,13 +236,9 @@
                 hlStep = (hlStep === 0) ? 1 : 0;
             }
             else if (mode === 'T') {
-                if (lastHouse === 'HL') {
-                    cmdToSend = (hlStep === 0) ? 'H' : 'L';
-                    hlStep = (hlStep === 0) ? 1 : 0;
-                } else if (lastHouse === 'LH') {
-                    cmdToSend = (hlStep === 0) ? 'L' : 'H';
-                    hlStep = (hlStep === 0) ? 1 : 0;
-                } else if (lastHouse === 'D') cmdToSend = 'D1H';
+                if (lastHouse === 'HL') { cmdToSend = (hlStep === 0) ? 'H' : 'L'; hlStep = (hlStep === 0) ? 1 : 0; } 
+                else if (lastHouse === 'LH') { cmdToSend = (hlStep === 0) ? 'L' : 'H'; hlStep = (hlStep === 0) ? 1 : 0; } 
+                else if (lastHouse === 'D') cmdToSend = 'D1H';
                 else if (lastHouse === 'DR') cmdToSend = 'D1L';
                 else cmdToSend = lastHouse;
             }
@@ -245,34 +246,22 @@
             if (cmdToSend !== '') {
                 sendBLECmd(cmdToSend);
                 if (isSyncEnabled) sendBLECmd("MODE:MAN_UPDATE:" + lastHouse + ":" + hlStep, true);
-                
                 const btn = document.getElementById('btn-' + mode);
-                if (btn) {
-                    btn.classList.add('active');
-                    setTimeout(() => btn.classList.remove('active'), 200);
-                }
+                if (btn) { btn.classList.add('active'); setTimeout(() => btn.classList.remove('active'), 200); }
                 updateArmUI();
             }
             return;
         }
 
-        // --- VOICE MODE (Arming) ---
         if (!fromSync) {
-            if (armedMode === mode) {
-                armedMode = null; 
-            } else {
+            if (armedMode === mode) armedMode = null; 
+            else {
                 armedMode = mode;
-                // V12 FIX: Instantly update lastHouse when button is clicked (if not T)
-                if (mode !== 'T' && mode !== 'CANCEL') {
-                    lastHouse = mode;
-                }
+                if (mode !== 'T' && mode !== 'CANCEL') lastHouse = mode;
             }
         } else {
             armedMode = mode; 
-            // Update lastHouse on incoming sync too
-            if (mode !== 'T' && mode !== null && mode !== 'CANCEL') {
-                lastHouse = mode;
-            }
+            if (mode !== 'T' && mode !== null && mode !== 'CANCEL') lastHouse = mode;
         }
         
         hlStep = 0; 
@@ -299,7 +288,6 @@
             bleDevice.addEventListener('gattserverdisconnected', handleBleDisconnect);
             const server = await bleDevice.gatt.connect();
             const service = await server.getPrimaryService(SERVICE_UUID);
-            
             bleCharacteristic = await service.getCharacteristic(CHAR_RX_UUID);
             bleTxCharacteristic = await service.getCharacteristic(CHAR_TX_UUID);
             await bleTxCharacteristic.startNotifications();
@@ -309,9 +297,7 @@
             document.getElementById('connectBtn').innerText = "Disconnect BLE";
             document.getElementById('connectBtn').style.background = "#dc3545"; 
             logMsg("BLE Connected! Syncing data...");
-
             setTimeout(() => { sendBLECmd("?"); }, 500);
-
         } catch (error) { logMsg("BLE Error: " + error); }
     });
 
@@ -324,29 +310,23 @@
         logMsg("BLE Disconnected.");
     }
 
-    // --- NOTIFICATION HANDLER (Receives Squad Broadcasts) ---
     function handleBleNotifications(event) {
         let msg = new TextDecoder('utf-8').decode(event.target.value).trim();
         if (msg === "" || msg.startsWith("Err: Unknown")) return;
 
         if (msg.startsWith("MODE:")) {
             if (!isSyncEnabled) return; 
-            
             if (msg === "MODE:VOICE") { setVoiceMode(true, true); return; }
             if (msg === "MODE:MANUAL") { setVoiceMode(false, true); return; }
-
             let parts = msg.split(":");
             let syncType = parts[1];
-            
             if (syncType === "MAN_UPDATE") {
                 lastHouse = parts[2];
                 if (parts[3]) hlStep = parseInt(parts[3]);
                 updateArmUI();
                 return;
             }
-
             if (parts[2]) lastHouse = parts[2]; 
-            
             if (syncType === "CANCEL") cancelMode(true);
             else setMode(syncType, true);
             return; 
@@ -354,13 +334,11 @@
 
         logMsg("📡 [TRAP]: " + msg);
 
-        // Keep physical button presses tracked in T mode
         if (msg === "CMD: High") { lastHouse = 'H'; updateArmUI(); }
         else if (msg === "CMD: Low") { lastHouse = 'L'; updateArmUI(); }
         else if (msg === "CMD: D1H" || msg === "CMD: Doubles") { lastHouse = 'D'; updateArmUI(); }
         else if (msg === "CMD: D1L") { lastHouse = 'DR'; updateArmUI(); }
 
-        // Delay Sync Handling
         if (isSyncEnabled) {
             if (msg.includes("Delay Set:")) {
                 let match = msg.match(/Delay Set: ([\d\.]+)/);
@@ -379,20 +357,40 @@
         }
     }
 
-    // --- MIC LOGIC ---
-    document.getElementById('listenBtn').addEventListener('click', async () => {
-        if (isMicActive) {
-            if (audioStream) audioStream.getTracks().forEach(track => track.stop()); 
-            if (audioContext && audioContext.state !== 'closed') audioContext.close();
-            if (animId) cancelAnimationFrame(animId);
-            
-            isMicActive = false;
-            document.getElementById('listenBtn').innerText = "Turn On Mic";
-            document.getElementById('listenBtn').style.background = "#28A745"; 
-            document.getElementById('vol-bar').style.width = "0%";
-            return;
+    // --- MIC AUTO-RESUME (OPTION 3) ---
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            if (isMicActive) {
+                wasMicActiveBeforeSleep = true;
+                stopMic(false); // Stop hardware gracefully, but don't completely reset UI
+                const btn = document.getElementById('listenBtn');
+                btn.innerText = "Mic Paused 💤";
+                btn.style.background = "#f39c12"; // Orange/Yellow
+            }
+        } else {
+            if (wasMicActiveBeforeSleep) {
+                wasMicActiveBeforeSleep = false;
+                logMsg("Phone woke up. Auto-resuming Mic...");
+                startMic();
+            }
         }
+    });
 
+    // --- LIVE MIC MONITOR (Heartbeat) ---
+    setInterval(() => {
+        if (isMicActive && !document.hidden) {
+            let trackAlive = audioStream && audioStream.getTracks().length > 0 && audioStream.getTracks()[0].readyState === 'live';
+            let contextAlive = audioContext && audioContext.state === 'running';
+
+            if (!trackAlive || !contextAlive) {
+                logMsg("⚠️ WARNING: iOS killed the mic stream unexpectedly. Resetting UI.");
+                stopMic(true);
+            }
+        }
+    }, 1500);
+
+    // --- MIC LOGIC ---
+    async function startMic() {
         try {
             audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             window.AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -412,6 +410,7 @@
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
 
             function checkVolume() {
+                if (!isMicActive) return; // Break animation loop if turned off
                 analyser.getByteFrequencyData(dataArray);
                 let sum = 0;
                 for(let i = 0; i < dataArray.length; i++) sum += dataArray[i];
@@ -425,7 +424,36 @@
                 animId = requestAnimationFrame(checkVolume);
             }
             checkVolume();
-        } catch (err) { logMsg("Mic Error: " + (err.message || err)); }
+            logMsg("Mic successfully activated!");
+        } catch (err) { 
+            logMsg("Mic Error: " + (err.message || err)); 
+            stopMic(true);
+        }
+    }
+
+    function stopMic(resetUI = true) {
+        if (audioStream) audioStream.getTracks().forEach(track => track.stop()); 
+        if (audioContext && audioContext.state !== 'closed') audioContext.close();
+        if (animId) cancelAnimationFrame(animId);
+        
+        isMicActive = false;
+        
+        if (resetUI) {
+            document.getElementById('listenBtn').innerText = "Turn On Mic";
+            document.getElementById('listenBtn').style.background = "#28A745"; 
+            document.getElementById('vol-bar').style.width = "0%";
+            logMsg("Mic Muted.");
+        }
+    }
+
+    document.getElementById('listenBtn').addEventListener('click', async () => {
+        if (isMicActive || wasMicActiveBeforeSleep) {
+            wasMicActiveBeforeSleep = false; // Override pause if user manually clicks
+            stopMic(true);
+        } else {
+            wasMicActiveBeforeSleep = false;
+            startMic();
+        }
     });
 
     // --- FIRING LOGIC ---
@@ -441,43 +469,19 @@
             cmdToSend = armedMode;
             cancelMode(false); 
         } 
-        else if (armedMode === 'D') {
-            cmdToSend = 'D1H'; 
-            cancelMode(false);
-        }
-        else if (armedMode === 'DR') {
-            cmdToSend = 'D1L'; 
-            cancelMode(false);
-        }
+        else if (armedMode === 'D') { cmdToSend = 'D1H'; cancelMode(false); }
+        else if (armedMode === 'DR') { cmdToSend = 'D1L'; cancelMode(false); }
         else if (armedMode === 'HL') {
-            if (hlStep === 0) {
-                cmdToSend = 'H';
-                hlStep = 1; 
-            } else {
-                cmdToSend = 'L';
-                hlStep = 0;
-                cancelMode(false); 
-            }
+            if (hlStep === 0) { cmdToSend = 'H'; hlStep = 1; } 
+            else { cmdToSend = 'L'; hlStep = 0; cancelMode(false); }
         } 
         else if (armedMode === 'LH') {
-            if (hlStep === 0) {
-                cmdToSend = 'L';
-                hlStep = 1; 
-            } else {
-                cmdToSend = 'H';
-                hlStep = 0;
-                cancelMode(false); 
-            }
+            if (hlStep === 0) { cmdToSend = 'L'; hlStep = 1; } 
+            else { cmdToSend = 'H'; hlStep = 0; cancelMode(false); }
         }
         else if (armedMode === 'T') {
-            if (lastHouse === 'HL') {
-                cmdToSend = (hlStep === 0) ? 'H' : 'L';
-                hlStep = (hlStep === 0) ? 1 : 0;
-            }
-            else if (lastHouse === 'LH') {
-                cmdToSend = (hlStep === 0) ? 'L' : 'H';
-                hlStep = (hlStep === 0) ? 1 : 0;
-            }
+            if (lastHouse === 'HL') { cmdToSend = (hlStep === 0) ? 'H' : 'L'; hlStep = (hlStep === 0) ? 1 : 0; }
+            else if (lastHouse === 'LH') { cmdToSend = (hlStep === 0) ? 'L' : 'H'; hlStep = (hlStep === 0) ? 1 : 0; }
             else if (lastHouse === 'D') cmdToSend = 'D1H';
             else if (lastHouse === 'DR') cmdToSend = 'D1L';
             else cmdToSend = lastHouse; 
