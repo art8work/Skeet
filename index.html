@@ -1,13 +1,14 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Voice Skeet Puller V8 (Multi-Sync)</title>
+    <title>Voice Skeet Puller V9</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: Arial; text-align: center; margin-top: 15px; background: #222; color: white;}
         
         /* Row 1: Top Buttons */
-        .top-btn { padding: 12px; font-size: 18px; margin: 5px; border-radius: 8px; width: 40%; font-weight: bold; border:none; cursor: pointer;}
+        .top-row { display: flex; justify-content: center; gap: 6px; margin: 5px 2%; }
+        .top-btn { flex: 1; padding: 12px 2px; font-size: 16px; border-radius: 8px; font-weight: bold; border:none; cursor: pointer; transition: background 0.3s;}
         
         /* Arming Status */
         #arm-status { font-size: 20px; font-weight: bold; color: #aaa; margin: 8px 0; min-height: 24px;}
@@ -39,11 +40,12 @@
 </head>
 <body>
 
-    <h2>Voice Puller V8 (Squad Sync)</h2>
+    <h2>Voice Puller V9</h2>
     
-    <div>
+    <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
         <button id="listenBtn" class="top-btn" style="background: #28A745; color: white;">Turn On Mic</button>
+        <button id="syncBtn" class="top-btn" style="background: #17a2b8; color: white;">Sync: ON</button>
     </div>
     
     <div id="arm-status">SAFE / DISARMED</div>
@@ -84,20 +86,17 @@
 <script>
     const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
     const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
-    const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e"; // Added TX UUID for receiving
+    const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
     
-    let bleDevice;
-    let bleCharacteristic; // For Writing
-    let bleTxCharacteristic; // For Reading
+    let bleDevice, bleCharacteristic, bleTxCharacteristic;
     let isBleConnected = false;
 
-    let audioContext;
-    let audioStream;
-    let animId;
+    let audioContext, audioStream, animId;
     let isMicActive = false;
     let isCoolingDown = false;
     let threshold = 50;
     
+    let isSyncEnabled = true; // Toggle for Squad Sync
     let armedMode = null;   
     let hlStep = 0;         
     let lastHouse = 'H';    
@@ -115,12 +114,23 @@
         document.getElementById('threshVal').innerText = threshold;
     }
 
-    // --- DELAY ADJUSTMENTS (Now purely relies on the ESP32 to confirm) ---
-    window.adjDelay = function(type, amt) {
-        if (!isBleConnected) {
-            logMsg("⚠️ Connect BLE to change settings.");
-            return;
+    // --- SYNC TOGGLE ---
+    document.getElementById('syncBtn').addEventListener('click', () => {
+        isSyncEnabled = !isSyncEnabled;
+        const btn = document.getElementById('syncBtn');
+        if (isSyncEnabled) {
+            btn.innerText = "Sync: ON";
+            btn.style.background = "#17a2b8";
+        } else {
+            btn.innerText = "Sync: OFF";
+            btn.style.background = "#6c757d";
         }
+        logMsg(isSyncEnabled ? "Squad Sync ENABLED." : "Squad Sync DISABLED. Running isolated.");
+    });
+
+    // --- DELAY ADJUSTMENTS ---
+    window.adjDelay = function(type, amt) {
+        if (!isBleConnected) return;
         if (type === 'D') {
             let temp = Math.max(0, dVal + amt);
             sendBLECmd("D" + temp.toFixed(1)); 
@@ -130,19 +140,8 @@
         }
     };
 
-    window.cancelMode = function() {
-        armedMode = null;
-        hlStep = 0;
-        document.querySelectorAll('.arm-btn').forEach(btn => btn.classList.remove('active'));
-        document.getElementById('arm-status').innerText = "SAFE / DISARMED";
-        document.getElementById('arm-status').style.color = "#aaa";
-    };
-
-    window.setMode = function(mode) {
-        if (armedMode === mode) armedMode = null; 
-        else armedMode = mode;
-        
-        hlStep = 0; 
+    // --- UI UPDATERS ---
+    function updateArmUI() {
         document.querySelectorAll('.arm-btn').forEach(btn => btn.classList.remove('active'));
         if (armedMode) document.getElementById('btn-' + armedMode).classList.add('active');
         
@@ -156,9 +155,39 @@
             else if (armedMode === 'T') as.innerText = "REPEATING: " + lastHouse;
             else as.innerText = "ARMED: " + armedMode;
         }
+        document.getElementById('btn-T').innerText = "T (" + lastHouse + ")";
+    }
+
+    window.cancelMode = function(fromSync = false) {
+        armedMode = null;
+        hlStep = 0;
+        updateArmUI();
+        if (!fromSync) logMsg("🚫 Sequence Cancelled. System SAFE.");
+        
+        if (!fromSync && isBleConnected && isSyncEnabled) {
+            sendBLECmd("MODE:CANCEL", true); // True = Silent log
+        }
     };
 
-    // --- BLE CONNECTION & SYNC LOGIC ---
+    window.setMode = function(mode, fromSync = false) {
+        if (!fromSync) {
+            if (armedMode === mode) armedMode = null; // Toggle off if user clicks active button
+            else armedMode = mode;
+        } else {
+            armedMode = mode; // Force mode if coming from Squad Sync
+        }
+        
+        hlStep = 0; 
+        updateArmUI();
+
+        // Broadcast change to squad
+        if (!fromSync && isBleConnected && isSyncEnabled) {
+            let syncMsg = armedMode ? "MODE:" + armedMode + ":" + lastHouse : "MODE:CANCEL";
+            sendBLECmd(syncMsg, true); 
+        }
+    };
+
+    // --- BLE CONNECTION ---
     document.getElementById('connectBtn').addEventListener('click', async () => {
         if (isBleConnected) {
             if (bleDevice && bleDevice.gatt.connected) bleDevice.gatt.disconnect();
@@ -170,16 +199,11 @@
                 filters:[{ name: 'BLUE Puller' }],
                 optionalServices:[SERVICE_UUID]
             });
-            
             bleDevice.addEventListener('gattserverdisconnected', handleBleDisconnect);
-            
             const server = await bleDevice.gatt.connect();
             const service = await server.getPrimaryService(SERVICE_UUID);
             
-            // Get Write Channel
             bleCharacteristic = await service.getCharacteristic(CHAR_RX_UUID);
-            
-            // Get Read/Notify Channel
             bleTxCharacteristic = await service.getCharacteristic(CHAR_TX_UUID);
             await bleTxCharacteristic.startNotifications();
             bleTxCharacteristic.addEventListener('characteristicvaluechanged', handleBleNotifications);
@@ -187,14 +211,11 @@
             isBleConnected = true;
             document.getElementById('connectBtn').innerText = "Disconnect BLE";
             document.getElementById('connectBtn').style.background = "#dc3545"; 
-            logMsg("BLE Connected! Syncing trap data...");
+            logMsg("BLE Connected! Syncing data...");
 
-            // Instantly ask ESP32 for current settings so the screen matches reality
             setTimeout(() => { sendBLECmd("?"); }, 500);
 
-        } catch (error) {
-            logMsg("BLE Error: " + error);
-        }
+        } catch (error) { logMsg("BLE Error: " + error); }
     });
 
     function handleBleDisconnect() {
@@ -206,41 +227,46 @@
         logMsg("BLE Disconnected.");
     }
 
-    // --- THE MULTI-USER SYNC ENGINE ---
-    // This listens to broadcasts from the ESP32 and updates the screen
+    // --- NOTIFICATION HANDLER (Receives Squad Broadcasts) ---
     function handleBleNotifications(event) {
-        let decoder = new TextDecoder('utf-8');
-        let msg = decoder.decode(event.target.value).trim();
+        let msg = new TextDecoder('utf-8').decode(event.target.value).trim();
         
-        logMsg("📡 [HOUSE]: " + msg); // Log everything the trap says
+        // Ignore echo loop artifacts
+        if (msg === "" || msg.startsWith("Err: Unknown")) return;
 
-        // If another phone (or this one) changes a setting, update the UI!
-        if (msg.includes("Delay Set:")) {
-            let match = msg.match(/Delay Set: ([\d\.]+)/);
-            if (match) {
-                dVal = parseFloat(match[1]);
-                document.getElementById('val-D').innerText = dVal.toFixed(1) + "s";
+        // Mode Sync Handling
+        if (msg.startsWith("MODE:")) {
+            if (!isSyncEnabled) return; // Ignore if user isolated their phone
+            
+            let parts = msg.split(":");
+            let syncedMode = parts[1];
+            if (parts[2]) lastHouse = parts[2]; // Update T-mode memory
+            
+            if (syncedMode === "CANCEL") {
+                cancelMode(true);
+            } else {
+                setMode(syncedMode, true);
             }
+            return; 
         }
-        if (msg.includes("Dbl Dly Set:")) {
-            let match = msg.match(/Dbl Dly Set: ([\d\.]+)/);
-            if (match) {
-                ddVal = parseFloat(match[1]);
-                document.getElementById('val-DD').innerText = ddVal.toFixed(1) + "s";
+
+        logMsg("📡 [TRAP]: " + msg);
+
+        // Delay Sync Handling
+        if (isSyncEnabled) {
+            if (msg.includes("Delay Set:")) {
+                let match = msg.match(/Delay Set: ([\d\.]+)/);
+                if (match) { dVal = parseFloat(match[1]); document.getElementById('val-D').innerText = dVal.toFixed(1) + "s"; }
             }
-        }
-        
-        // Handle the "?" Status Sync
-        if (msg.includes("STATUS:")) {
-            let dMatch = msg.match(/Delay: ([\d\.]+)/);
-            if(dMatch) { 
-                dVal = parseFloat(dMatch[1]); 
-                document.getElementById('val-D').innerText = dVal.toFixed(1) + "s"; 
+            if (msg.includes("Dbl Dly Set:")) {
+                let match = msg.match(/Dbl Dly Set: ([\d\.]+)/);
+                if (match) { ddVal = parseFloat(match[1]); document.getElementById('val-DD').innerText = ddVal.toFixed(1) + "s"; }
             }
-            let ddMatch = msg.match(/Dbl: ([\d\.]+)/);
-            if(ddMatch) { 
-                ddVal = parseFloat(ddMatch[1]); 
-                document.getElementById('val-DD').innerText = ddVal.toFixed(1) + "s"; 
+            if (msg.includes("STATUS:")) {
+                let dMatch = msg.match(/Delay: ([\d\.]+)/);
+                if(dMatch) { dVal = parseFloat(dMatch[1]); document.getElementById('val-D').innerText = dVal.toFixed(1) + "s"; }
+                let ddMatch = msg.match(/Dbl: ([\d\.]+)/);
+                if(ddMatch) { ddVal = parseFloat(ddMatch[1]); document.getElementById('val-DD').innerText = ddVal.toFixed(1) + "s"; }
             }
         }
     }
@@ -256,7 +282,6 @@
             document.getElementById('listenBtn').innerText = "Turn On Mic";
             document.getElementById('listenBtn').style.background = "#28A745"; 
             document.getElementById('vol-bar').style.width = "0%";
-            logMsg("Mic Muted.");
             return;
         }
 
@@ -266,15 +291,12 @@
             audioContext = new window.AudioContext();
             if (audioContext.state === 'suspended') await audioContext.resume();
             
-            if (audioContext.state !== 'running') {
-                logMsg("ERROR: iOS Audio Engine failed to start.");
-                return;
-            }
+            if (audioContext.state !== 'running') { logMsg("ERROR: Audio Engine failed."); return; }
 
             isMicActive = true;
             document.getElementById('listenBtn').innerText = "Mute Mic 🎤";
             document.getElementById('listenBtn').style.background = "#dc3545"; 
-            
+
             const analyser = audioContext.createAnalyser();
             const microphone = audioContext.createMediaStreamSource(audioStream);
             analyser.fftSize = 256;
@@ -295,9 +317,7 @@
                 animId = requestAnimationFrame(checkVolume);
             }
             checkVolume();
-        } catch (err) {
-            logMsg("Mic Error: " + (err.message || err));
-        }
+        } catch (err) { logMsg("Mic Error: " + (err.message || err)); }
     });
 
     // --- FIRING LOGIC ---
@@ -312,17 +332,17 @@
         if (armedMode === 'H' || armedMode === 'L') {
             cmdToSend = armedMode;
             lastHouse = armedMode;
-            setMode(null); 
+            cancelMode(false); // Sends CANCEL to squad automatically
         } 
         else if (armedMode === 'D') {
             cmdToSend = 'D1H'; 
             lastHouse = 'D';
-            setMode(null);
+            cancelMode(false);
         }
         else if (armedMode === 'DR') {
             cmdToSend = 'D1L'; 
             lastHouse = 'DR';
-            setMode(null);
+            cancelMode(false);
         }
         else if (armedMode === 'HL') {
             if (hlStep === 0) {
@@ -333,7 +353,7 @@
             } else {
                 cmdToSend = 'L';
                 lastHouse = 'L';
-                setMode(null); 
+                cancelMode(false); 
             }
         } 
         else if (armedMode === 'T') {
@@ -342,32 +362,29 @@
             if (cmdToSend === 'DR') cmdToSend = 'D1L';
         }
 
-        document.getElementById('btn-T').innerText = "T (" + lastHouse + ")";
+        updateArmUI();
+        logMsg("💥 LOUD NOISE (Vol: " + Math.round(vol) + ")");
         
-        if (cmdToSend !== '') {
-            await sendBLECmd(cmdToSend);
-        }
+        if (cmdToSend !== '') await sendBLECmd(cmdToSend);
 
+        // DELAY BETWEEN SHOTS CHANGED TO 500ms
         setTimeout(() => {
             isCoolingDown = false;
             document.getElementById('vol-bar').style.background = "#0f0";
         }, 500); 
     }
 
-    async function sendBLECmd(cmd) {
+    async function sendBLECmd(cmd, silent = false) {
         if (bleCharacteristic && isBleConnected) {
             try {
                 let encoder = new TextEncoder('utf-8');
                 await bleCharacteristic.writeValue(encoder.encode(cmd));
+                if (!silent) logMsg("🚀 SENT BLE: '" + cmd + "'");
             } catch (err) {
                 logMsg("BLE Send Failed: " + err);
             }
-        } else {
-            logMsg("⚠️ Offline. Would send: " + cmd);
         }
     }
 </script>
 </body>
 </html>
-
-
