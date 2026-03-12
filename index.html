@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Skeet Puller V10</title>
+    <title>Voice Skeet Puller V11</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body { font-family: Arial; text-align: center; margin-top: 15px; background: #222; color: white;}
@@ -11,16 +11,16 @@
         .top-btn { flex: 1; padding: 12px 2px; font-size: 16px; border-radius: 8px; font-weight: bold; border:none; cursor: pointer; transition: background 0.3s;}
         
         /* Arming Status */
-        #arm-status { font-size: 20px; font-weight: bold; color: #aaa; margin: 10px 0; min-height: 24px;}
+        #arm-status { font-size: 18px; font-weight: bold; color: #aaa; margin: 10px 0; min-height: 24px;}
         
-        /* Arming Panel */
-        #arm-panel { display: flex; justify-content: center; margin: 8px 2%; flex-wrap: wrap; gap: 5px; }
+        /* Arming Panel (8 Buttons = 2 Rows of 4) */
+        #arm-panel { display: flex; justify-content: center; margin: 8px 2%; flex-wrap: wrap; gap: 6px; }
         .arm-btn { 
-            flex: 1 1 20%; padding: 12px 0px; font-size: 16px; font-weight: bold;
+            flex: 1 1 22%; padding: 12px 0px; font-size: 16px; font-weight: bold;
             background: #444; color: white; border: 2px solid #222; border-radius: 8px; cursor: pointer;
         }
         .arm-btn.active { background: #e74c3c; border-color: #ffeb3b; color: white;} 
-        .cancel-btn { background: #8b0000; color: #fff; border-color: #ff4444; flex: 1 1 30%; }
+        .cancel-btn { background: #8b0000; color: #fff; border-color: #ff4444; }
         
         /* Delay Controls */
         .delay-row { display: flex; justify-content: space-between; align-items: center; margin: 8px 5%; background: #333; padding: 6px 12px; border-radius: 8px; }
@@ -40,7 +40,7 @@
 </head>
 <body>
 
-    <h2>Voice Puller V10</h2>
+    <h2>Voice Puller V11</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -53,12 +53,14 @@
     
     <div id="arm-status">SAFE / DISARMED</div>
 
+    <!-- Mode Buttons (Now 8 Buttons for perfect symmetry) -->
     <div id="arm-panel">
         <button id="btn-H" class="arm-btn" onclick="setMode('H')">H</button>
         <button id="btn-L" class="arm-btn" onclick="setMode('L')">L</button>
         <button id="btn-D" class="arm-btn" onclick="setMode('D')">D</button>
         <button id="btn-DR" class="arm-btn" onclick="setMode('DR')">DR</button>
         <button id="btn-HL" class="arm-btn" onclick="setMode('HL')">HL</button>
+        <button id="btn-LH" class="arm-btn" onclick="setMode('LH')">LH</button>
         <button id="btn-T" class="arm-btn" onclick="setMode('T')">T (H)</button>
         <button id="btn-CANCEL" class="arm-btn cancel-btn" onclick="cancelMode()">CANCEL</button>
     </div>
@@ -100,7 +102,7 @@
     let threshold = 50;
     
     let isSyncEnabled = true; 
-    let isVoiceMode = true; // Default to Voice Mode
+    let isVoiceMode = true; 
     
     let armedMode = null;   
     let hlStep = 0;         
@@ -130,7 +132,7 @@
             btn.innerText = "Sync: OFF";
             btn.style.background = "#6c757d";
         }
-        logMsg(isSyncEnabled ? "Squad Sync ENABLED." : "Squad Sync DISABLED. Running isolated.");
+        logMsg(isSyncEnabled ? "Squad Sync ENABLED." : "Squad Sync DISABLED.");
     });
 
     document.getElementById('vmBtn').addEventListener('click', () => {
@@ -142,13 +144,11 @@
         const btn = document.getElementById('vmBtn');
         if (isVoiceMode) {
             btn.innerText = "Mode: VOICE";
-            btn.style.background = "#9b59b6"; // Purple
-            if (!fromSync) logMsg("Switched to VOICE mode.");
+            btn.style.background = "#9b59b6"; 
         } else {
             btn.innerText = "Mode: MANUAL";
-            btn.style.background = "#fd7e14"; // Orange
-            if (!fromSync) logMsg("Switched to MANUAL mode.");
-            cancelMode(true); // Clear any pending armed status
+            btn.style.background = "#fd7e14"; 
+            cancelMode(true); 
         }
         updateArmUI();
 
@@ -157,7 +157,6 @@
         }
     }
 
-    // --- DELAY ADJUSTMENTS ---
     window.adjDelay = function(type, amt) {
         if (!isBleConnected) return;
         if (type === 'D') {
@@ -174,10 +173,13 @@
         document.querySelectorAll('.arm-btn').forEach(btn => btn.classList.remove('active'));
         const as = document.getElementById('arm-status');
         
+        document.getElementById('btn-T').innerText = "T (" + lastHouse + ")";
+
         if (!isVoiceMode) {
             as.innerText = "MANUAL MODE (Tap to Fire)";
+            if (lastHouse === 'HL') as.innerText += `[HL: Next is ${hlStep === 0 ? 'High' : 'Low'}]`;
+            if (lastHouse === 'LH') as.innerText += `[LH: Next is ${hlStep === 0 ? 'Low' : 'High'}]`;
             as.style.color = "#fd7e14";
-            document.getElementById('btn-T').innerText = "T (" + lastHouse + ")";
             return;
         }
 
@@ -188,11 +190,18 @@
             as.style.color = "#aaa";
         } else {
             as.style.color = "#ff4444";
-            if (armedMode === 'HL') as.innerText = "ARMED: High -> Low";
-            else if (armedMode === 'T') as.innerText = "REPEATING: " + lastHouse;
-            else as.innerText = "ARMED: " + armedMode;
+            if (armedMode === 'HL') {
+                as.innerText = hlStep === 0 ? "ARMED: High -> Low" : "ARMED: Now Pulling Low";
+            } else if (armedMode === 'LH') {
+                as.innerText = hlStep === 0 ? "ARMED: Low -> High" : "ARMED: Now Pulling High";
+            } else if (armedMode === 'T') {
+                if (lastHouse === 'HL') as.innerText = "REPEATING: HL (" + (hlStep === 0 ? "Next: High" : "Next: Low") + ")";
+                else if (lastHouse === 'LH') as.innerText = "REPEATING: LH (" + (hlStep === 0 ? "Next: Low" : "Next: High") + ")";
+                else as.innerText = "REPEATING: " + lastHouse;
+            } else {
+                as.innerText = "ARMED: " + armedMode;
+            }
         }
-        document.getElementById('btn-T').innerText = "T (" + lastHouse + ")";
     }
 
     window.cancelMode = function(fromSync = false) {
@@ -204,33 +213,50 @@
     };
 
     window.setMode = function(mode, fromSync = false) {
-        // --- MANUAL MODE BEHAVIOR (Instant Fire) ---
+        // --- MANUAL MODE (Instant Fire) ---
         if (!isVoiceMode && !fromSync) {
             let cmdToSend = '';
-            if (mode === 'H' || mode === 'L') { cmdToSend = mode; hlStep = 0; }
-            else if (mode === 'D') { cmdToSend = 'D1H'; hlStep = 0; }
-            else if (mode === 'DR') { cmdToSend = 'D1L'; hlStep = 0; }
+            
+            if (mode === 'H' || mode === 'L') { cmdToSend = mode; hlStep = 0; lastHouse = mode; }
+            else if (mode === 'D') { cmdToSend = 'D1H'; hlStep = 0; lastHouse = 'D'; }
+            else if (mode === 'DR') { cmdToSend = 'D1L'; hlStep = 0; lastHouse = 'DR'; }
             else if (mode === 'HL') {
-                if (hlStep === 0) { cmdToSend = 'H'; hlStep = 1; }
-                else { cmdToSend = 'L'; hlStep = 0; }
+                lastHouse = 'HL';
+                cmdToSend = (hlStep === 0) ? 'H' : 'L';
+                hlStep = (hlStep === 0) ? 1 : 0;
+            }
+            else if (mode === 'LH') {
+                lastHouse = 'LH';
+                cmdToSend = (hlStep === 0) ? 'L' : 'H';
+                hlStep = (hlStep === 0) ? 1 : 0;
             }
             else if (mode === 'T') {
-                cmdToSend = lastHouse;
-                if (cmdToSend === 'D') cmdToSend = 'D1H';
-                if (cmdToSend === 'DR') cmdToSend = 'D1L';
+                if (lastHouse === 'HL') {
+                    cmdToSend = (hlStep === 0) ? 'H' : 'L';
+                    hlStep = (hlStep === 0) ? 1 : 0;
+                } else if (lastHouse === 'LH') {
+                    cmdToSend = (hlStep === 0) ? 'L' : 'H';
+                    hlStep = (hlStep === 0) ? 1 : 0;
+                } else if (lastHouse === 'D') cmdToSend = 'D1H';
+                else if (lastHouse === 'DR') cmdToSend = 'D1L';
+                else cmdToSend = lastHouse;
             }
 
             if (cmdToSend !== '') {
                 sendBLECmd(cmdToSend);
-                // Flash button for visual feedback
+                if (isSyncEnabled) sendBLECmd("MODE:MAN_UPDATE:" + lastHouse + ":" + hlStep, true);
+                
                 const btn = document.getElementById('btn-' + mode);
-                btn.classList.add('active');
-                setTimeout(() => btn.classList.remove('active'), 200);
+                if (btn) {
+                    btn.classList.add('active');
+                    setTimeout(() => btn.classList.remove('active'), 200);
+                }
+                updateArmUI();
             }
             return;
         }
 
-        // --- VOICE MODE BEHAVIOR (Arming) ---
+        // --- VOICE MODE (Arming) ---
         if (!fromSync) {
             if (armedMode === mode) armedMode = null; 
             else armedMode = mode;
@@ -292,7 +318,7 @@
         let msg = new TextDecoder('utf-8').decode(event.target.value).trim();
         if (msg === "" || msg.startsWith("Err: Unknown")) return;
 
-        // Sync Modes across devices
+        // Mode Sync Handling
         if (msg.startsWith("MODE:")) {
             if (!isSyncEnabled) return; 
             
@@ -300,22 +326,23 @@
             if (msg === "MODE:MANUAL") { setVoiceMode(false, true); return; }
 
             let parts = msg.split(":");
-            let syncedMode = parts[1];
+            let syncType = parts[1];
+            
+            if (syncType === "MAN_UPDATE") {
+                lastHouse = parts[2];
+                if (parts[3]) hlStep = parseInt(parts[3]);
+                updateArmUI();
+                return;
+            }
+
             if (parts[2]) lastHouse = parts[2]; 
             
-            if (syncedMode === "CANCEL") cancelMode(true);
-            else setMode(syncedMode, true);
+            if (syncType === "CANCEL") cancelMode(true);
+            else setMode(syncType, true);
             return; 
         }
 
         logMsg("📡 [TRAP]: " + msg);
-
-        // Auto-update 'lastHouse' so 'T' mode is always accurate for everyone
-        if (msg === "CMD: High") lastHouse = 'H';
-        else if (msg === "CMD: Low") lastHouse = 'L';
-        else if (msg === "CMD: D1H" || msg === "CMD: Doubles") lastHouse = 'D';
-        else if (msg === "CMD: D1L") lastHouse = 'DR';
-        updateArmUI();
 
         // Delay Sync Handling
         if (isSyncEnabled) {
@@ -410,21 +437,39 @@
             cancelMode(false);
         }
         else if (armedMode === 'HL') {
+            lastHouse = 'HL';
             if (hlStep === 0) {
                 cmdToSend = 'H';
-                lastHouse = 'H';
                 hlStep = 1; 
-                document.getElementById('arm-status').innerText = "ARMED: Now Pulling Low";
             } else {
                 cmdToSend = 'L';
-                lastHouse = 'L';
+                hlStep = 0;
                 cancelMode(false); 
             }
         } 
+        else if (armedMode === 'LH') {
+            lastHouse = 'LH';
+            if (hlStep === 0) {
+                cmdToSend = 'L';
+                hlStep = 1; 
+            } else {
+                cmdToSend = 'H';
+                hlStep = 0;
+                cancelMode(false); 
+            }
+        }
         else if (armedMode === 'T') {
-            cmdToSend = lastHouse; 
-            if (cmdToSend === 'D') cmdToSend = 'D1H';
-            if (cmdToSend === 'DR') cmdToSend = 'D1L';
+            if (lastHouse === 'HL') {
+                cmdToSend = (hlStep === 0) ? 'H' : 'L';
+                hlStep = (hlStep === 0) ? 1 : 0;
+            }
+            else if (lastHouse === 'LH') {
+                cmdToSend = (hlStep === 0) ? 'L' : 'H';
+                hlStep = (hlStep === 0) ? 1 : 0;
+            }
+            else if (lastHouse === 'D') cmdToSend = 'D1H';
+            else if (lastHouse === 'DR') cmdToSend = 'D1L';
+            else cmdToSend = lastHouse; 
         }
 
         updateArmUI();
