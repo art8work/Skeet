@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V19.18</title>
+    <title>AI Skeet Puller V19.19</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="edge-impulse-standalone.js"></script>
     <style>
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V19.18 (Edge Impulse)</h2>
+    <h2>AI Puller V19.19 (Edge Impulse)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -338,51 +338,103 @@
             logMsg("🎙️ AudioContext sampleRate: " + nativeSampleRate + "Hz");
 
             aiProcessor.onaudioprocess = function(e) {
-                if (!isMicActive) return;
+    if (!isMicActive) return;
 
-                const rawChunk = e.inputBuffer.getChannelData(0);
+    const rawChunk = e.inputBuffer.getChannelData(0);
 
-                // --- STEP 1: Downsample chunk to 16kHz ---
-                let chunk16k;
-                if (nativeSampleRate !== targetSampleRate) {
-                    const ratio  = nativeSampleRate / targetSampleRate;
-                    const newLen = Math.round(rawChunk.length / ratio);
-                    chunk16k     = new Float32Array(newLen);
-                    for (let i = 0; i < newLen; i++) {
-                        chunk16k[i] = rawChunk[Math.floor(i * ratio)];
-                    }
-                } else {
-                    chunk16k = new Float32Array(rawChunk);
-                }
+    const nativeSampleRate = audioContext.sampleRate;
+    const targetSampleRate = 16000;
 
-                // --- STEP 2: DC offset removal per chunk ---
-                let mean = 0;
-                for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i];
-                mean /= chunk16k.length;
-                for (let i = 0; i < chunk16k.length; i++) {
-                    chunk16k[i] -= mean;
-                    if (chunk16k[i] >  1) chunk16k[i] =  1;
-                    if (chunk16k[i] < -1) chunk16k[i] = -1;
-                }
+    // =========================
+    // 1. Downsample to 16kHz
+    // =========================
+    let chunk16k;
+    if (nativeSampleRate !== targetSampleRate) {
+        const ratio  = nativeSampleRate / targetSampleRate;
+        const newLen = Math.round(rawChunk.length / ratio);
+        chunk16k     = new Float32Array(newLen);
 
-                // --- STEP 3: Feed WAV capture (runs on EVERY chunk, always 16kHz) ---
-                if (wavCaptureBuffer !== null) {
-                    for (let i = 0; i < chunk16k.length; i++) {
-                        wavCaptureBuffer.push(chunk16k[i]);
-                    }
-                }
+        for (let i = 0; i < newLen; i++) {
+            chunk16k[i] = rawChunk[Math.floor(i * ratio)];
+        }
+    } else {
+        chunk16k = new Float32Array(rawChunk);
+    }
 
-                // --- STEP 4: Accumulate for inference (1-second sliding window) ---
-                if (micState !== 1) {
-                    for (let i = 0; i < chunk16k.length; i++) {
-                        audioDataBuffer.push(chunk16k[i]);
-                    }
-                    if (audioDataBuffer.length >= 16000) {
-                        if (classifierInitialized) runAiInference(audioDataBuffer.slice(0, 16000));
-                        audioDataBuffer = audioDataBuffer.slice(4000); // slide 250ms
-                    }
-                }
-            };
+    // =========================
+    // 2. Remove DC offset + clamp
+    // =========================
+    let mean = 0;
+    for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i];
+    mean /= chunk16k.length;
+
+    let peak = 0;
+    for (let i = 0; i < chunk16k.length; i++) {
+        let v = chunk16k[i] - mean;
+
+        // clamp
+        if (v > 1) v = 1;
+        if (v < -1) v = -1;
+
+        chunk16k[i] = v;
+
+        let abs = Math.abs(v);
+        if (abs > peak) peak = abs;
+    }
+
+    // =========================
+    // 3. ENERGY GATE (CRITICAL)
+    // =========================
+    let energy = 0;
+    for (let i = 0; i < chunk16k.length; i++) {
+        energy += chunk16k[i] * chunk16k[i];
+    }
+    energy = Math.sqrt(energy / chunk16k.length);
+
+    // Tune these if needed
+    const ENERGY_THRESHOLD = 0.015;
+    const PEAK_THRESHOLD   = 0.05;
+
+    if (energy < ENERGY_THRESHOLD && peak < PEAK_THRESHOLD) {
+        return; // skip silence/noise → FIXES "always noise"
+    }
+
+    // =========================
+    // 4. WAV CAPTURE (unchanged)
+    // =========================
+    if (wavCaptureBuffer !== null) {
+        for (let i = 0; i < chunk16k.length; i++) {
+            wavCaptureBuffer.push(chunk16k[i]);
+        }
+    }
+
+    // =========================
+    // 5. Accumulate buffer
+    // =========================
+    if (micState !== 1) {
+        for (let i = 0; i < chunk16k.length; i++) {
+            audioDataBuffer.push(chunk16k[i]);
+        }
+
+        // =========================
+        // 6. Run inference (LATEST audio)
+        // =========================
+        const FRAME_SIZE = 16000; // 1 sec @16kHz
+
+        if (audioDataBuffer.length >= FRAME_SIZE) {
+
+            // 🔥 USE MOST RECENT AUDIO
+            const slice = audioDataBuffer.slice(-FRAME_SIZE);
+
+            if (classifierInitialized) {
+                runAiInference(slice);
+            }
+
+            // slide window (keep responsiveness)
+            audioDataBuffer = audioDataBuffer.slice(-12000);
+        }
+    }
+};
 
             // Volume bar animation loop
             function checkVolume() {
