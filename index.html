@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V19.12</title>
+    <title>AI Skeet Puller V19.13</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- Load the Edge Impulse AI Engine (must be in same folder) -->
     <script src="edge-impulse-standalone.js"></script>
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V19.12 (Edge Impulse)</h2>
+    <h2>AI Puller V19.13 (Edge Impulse)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -322,6 +322,45 @@
             aiProcessor.onaudioprocess = function(e) {
                 if (!isMicActive || micState === 1) return;
                 const inputData = e.inputBuffer.getChannelData(0);
+
+// Downsample to 16kHz if needed
+let downsampled = inputData;
+if (audioContext.sampleRate !== 16000) {
+    const ratio = audioContext.sampleRate / 16000;
+    const newLen = Math.round(inputData.length / ratio);
+    downsampled = new Float32Array(newLen);
+
+    for (let i = 0; i < newLen; i++) {
+        downsampled[i] = inputData[Math.floor(i * ratio)];
+    }
+}
+
+
+    let max = 0;
+    for (let i = 0; i < downsampled.length; i++) {
+        if (Math.abs(downsampled[i]) > max) max = Math.abs(downsampled[i]);
+    }
+    logMsg("Audio level: " + max.toFixed(3));
+
+    // Push audio into buffer
+    for (let i = 0; i < downsampled.length; i++) {
+        audioDataBuffer.push(downsampled[i]);
+    }
+
+    // Inference trigger (leave this as 16000!)
+    if (audioDataBuffer.length >= 16000) {
+        if (classifierInitialized) {
+            runAiInference(audioDataBuffer.slice(0, 16000));
+        }
+        audioDataBuffer = audioDataBuffer.slice(4000);
+    }
+};
+
+
+
+
+
+                
                 for (let i = 0; i < inputData.length; i++) audioDataBuffer.push(inputData[i]);
 
                 // Accumulate 1 second (16000 samples) then infer with sliding window
@@ -359,7 +398,7 @@
 
         } catch (err) { logMsg("Mic Error: " + (err.message || err)); stopMic(true); }
     }
-
+logMsg("Actual sampleRate: " + audioContext.sampleRate);
     function stopMic(resetUI = true) {
         if (aiProcessor) { aiProcessor.disconnect(); aiProcessor = null; }
         if (audioStream) audioStream.getTracks().forEach(t => t.stop());
