@@ -454,7 +454,14 @@
 
         // CLEAR BUFFER to prevent rapid double-fire from old audio!
         audioDataBuffer =[];
-
-        setTimeout(() => {
+setTimeout(() => {
             micState = 2;
-            audioDataBuffer =
+            audioDataBuffer = new Array(0);
+            document.getElementById('vol-bar').style.background = "#f39c12";
+            document.getElementById('md-display').style.color = "#aaa";
+            logMsg("Lockout over. Waiting for quiet...");
+        }, totalLockout);
+    }
+</script>
+</body>
+</html>
