@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V19.20</title>
+    <title>AI Skeet Puller V19.21</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="edge-impulse-standalone.js"></script>
     <style>
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V19.20 (Edge Impulse)</h2>
+    <h2>AI Puller V19.21 (Edge Impulse)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -216,7 +216,7 @@
 
     // Set this to your exact label name after you see it in the log below.
     // Leave as null to auto-detect (uses whichever label scores highest).
-    let targetLabel = null; // e.g. set to "Pull" or "pull" or "yes" once confirmed
+    let targetLabel = "pull"; // matched case-insensitively against model labels
 
     function runAiInference(dataArray) {
         if (!classifierInitialized || !eiClassifier || !isAiEnabled) return;
@@ -325,37 +325,59 @@
             source.connect(aiProcessor);
             aiProcessor.connect(audioContext.destination);
 
+            // Log actual sample rate once so we can confirm iOS behavior
+            logMsg("🎙️ Actual AudioContext sampleRate: " + audioContext.sampleRate + "Hz");
+
+            // How many NATIVE samples = 1 second of audio at 16kHz after downsampling
+            // If iOS runs at 44100, we need 44100 raw samples to produce 16000 downsampled
+            const nativeSampleRate  = audioContext.sampleRate;
+            const targetSampleRate  = 16000;
+            const needNativeSamples = (nativeSampleRate !== targetSampleRate)
+                ? Math.round(nativeSampleRate)          // 1 second worth of native samples
+                : 16000;
+            const slideNativeSamples = Math.round(needNativeSamples * 0.25); // slide 250ms
+
             aiProcessor.onaudioprocess = function(e) {
                 if (!isMicActive || micState === 1) return;
 
-                let inputData = e.inputBuffer.getChannelData(0);
+                const inputData = e.inputBuffer.getChannelData(0);
 
-                // Downsample if browser ignored the 16kHz request (iOS)
-                if (audioContext.sampleRate !== 16000) {
-                    const ratio  = audioContext.sampleRate / 16000;
-                    const newLen = Math.round(inputData.length / ratio);
-                    const ds     = new Float32Array(newLen);
-                    for (let i = 0; i < newLen; i++) ds[i] = inputData[Math.floor(i * ratio)];
-                    inputData = ds;
-                }
-
-                // DC offset removal
-                let mean = 0;
-                for (let i = 0; i < inputData.length; i++) mean += inputData[i];
-                mean /= inputData.length;
-
-                // Push normalised samples — NO gain boost (clipping kills AI)
-                // The model was trained on clean mic audio; boosting distorts features
+                // Push raw native-rate samples into buffer
                 for (let i = 0; i < inputData.length; i++) {
-                    let v = inputData[i] - mean;
-                    if (v >  1) v =  1;
-                    if (v < -1) v = -1;
-                    audioDataBuffer.push(v);
+                    audioDataBuffer.push(inputData[i]);
                 }
 
-                if (audioDataBuffer.length >= 16000) {
-                    if (classifierInitialized) runAiInference(audioDataBuffer.slice(0, 16000));
-                    audioDataBuffer = audioDataBuffer.slice(4000); // slide 250ms
+                // Once we have 1 full second of NATIVE samples, downsample then infer
+                if (audioDataBuffer.length >= needNativeSamples) {
+                    const nativeSlice = audioDataBuffer.slice(0, needNativeSamples);
+
+                    // Downsample to 16kHz if needed
+                    let processed;
+                    if (nativeSampleRate !== targetSampleRate) {
+                        const ratio  = nativeSampleRate / targetSampleRate;
+                        const newLen = 16000; // always exactly 16000 output samples
+                        processed    = new Float32Array(newLen);
+                        for (let i = 0; i < newLen; i++) {
+                            processed[i] = nativeSlice[Math.floor(i * ratio)];
+                        }
+                    } else {
+                        processed = new Float32Array(nativeSlice);
+                    }
+
+                    // DC offset removal on the downsampled data
+                    let mean = 0;
+                    for (let i = 0; i < processed.length; i++) mean += processed[i];
+                    mean /= processed.length;
+                    for (let i = 0; i < processed.length; i++) {
+                        processed[i] -= mean;
+                        if (processed[i] >  1) processed[i] =  1;
+                        if (processed[i] < -1) processed[i] = -1;
+                    }
+
+                    if (classifierInitialized) runAiInference(processed);
+
+                    // Slide the native buffer by 250ms worth of native samples
+                    audioDataBuffer = audioDataBuffer.slice(slideNativeSamples);
                 }
             };
 
