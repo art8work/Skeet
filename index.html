@@ -87,7 +87,7 @@
     <!-- WAV capture: records exactly what the model hears so you can compare to training data -->
     <div style="margin:8px 3%;">
         <button id="recBtn" class="top-btn" style="background:#c0392b;color:white;width:48%;font-size:14px;padding:8px;">
-            ⏺ Record 3s Sample
+            ⏺ Record &amp; Share WAV
         </button>
         <a id="wavLink" style="display:none"></a>
     </div>
@@ -727,40 +727,55 @@
         }, 4000);
     });
 
-    function downloadWav(samples, sampleRate) {
-        // Build a proper 16-bit PCM WAV file
+    function buildWavBlob(samples, sampleRate) {
         const numSamples = samples.length;
         const buffer     = new ArrayBuffer(44 + numSamples * 2);
         const view       = new DataView(buffer);
-
         function writeStr(off, str) { for (let i=0;i<str.length;i++) view.setUint8(off+i, str.charCodeAt(i)); }
         writeStr(0,  'RIFF');
         view.setUint32(4,  36 + numSamples * 2, true);
         writeStr(8,  'WAVE');
         writeStr(12, 'fmt ');
-        view.setUint32(16, 16, true);        // chunk size
-        view.setUint16(20, 1,  true);        // PCM
-        view.setUint16(22, 1,  true);        // mono
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1,  true);   // PCM
+        view.setUint16(22, 1,  true);   // mono
         view.setUint32(24, sampleRate, true);
-        view.setUint32(28, sampleRate * 2, true); // byte rate
-        view.setUint16(32, 2,  true);        // block align
-        view.setUint16(34, 16, true);        // bits per sample
+        view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2,  true);
+        view.setUint16(34, 16, true);
         writeStr(36, 'data');
         view.setUint32(40, numSamples * 2, true);
-
-        // Convert float32 → int16
         for (let i = 0; i < numSamples; i++) {
             let s = Math.max(-1, Math.min(1, samples[i]));
             view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
         }
+        return new Blob([buffer], { type: 'audio/wav' });
+    }
 
-        const blob = new Blob([buffer], { type: 'audio/wav' });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.getElementById('wavLink');
-        a.href     = url;
-        a.download = 'ei-sample-' + Date.now() + '.wav';
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 5000);
+    async function downloadWav(samples, sampleRate) {
+        const blob     = buildWavBlob(samples, sampleRate);
+        const fileName = 'ei-sample-' + Date.now() + '.wav';
+
+        // iOS Safari: use Web Share API → "Save to Files" / AirDrop / Voice Memos
+        if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: 'audio/wav' })] })) {
+            try {
+                await navigator.share({
+                    files: [new File([blob], fileName, { type: 'audio/wav' })],
+                    title: 'Edge Impulse Sample'
+                });
+                logMsg("✅ Shared! Save to Files app to access on your Mac.");
+                return;
+            } catch(e) {
+                if (e.name !== 'AbortError') logMsg("Share failed: " + e + " — trying fallback");
+            }
+        }
+
+        // Fallback: open WAV in new tab (iOS Safari will play it inline)
+        // User can then tap Share → Save to Files
+        const url = URL.createObjectURL(blob);
+        logMsg("📂 WAV opening in new tab — tap Share → Save to Files");
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
     }
 
     async function sendBLECmd(cmd, silent=false) {
