@@ -1,52 +1,41 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V22</title>
+    <title>AI Skeet Puller V23</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="edge-impulse-standalone.js?v=22"></script>
+    <script src="edge-impulse-standalone.js?v=23"></script>
     <style>
-        body { font-family: Arial; text-align: center; margin-top: 15px; background: #222; color: white;}
-        .top-row { display: flex; justify-content: center; gap: 8px; margin: 8px 3%; }
-        .top-btn { flex: 1; padding: 12px 2px; font-size: 16px; border-radius: 8px; font-weight: bold; border:none; cursor: pointer;}
-        #arm-status { font-size: 18px; font-weight: bold; color: #aaa; margin: 10px 0; min-height: 24px;}
-        #arm-panel { display: flex; justify-content: center; margin: 8px 2%; flex-wrap: wrap; gap: 6px; }
-        .arm-btn { flex: 1 1 22%; padding: 12px 0px; font-size: 16px; font-weight: bold; background: #444; color: white; border: 2px solid #222; border-radius: 8px; cursor: pointer;}
-        .arm-btn.active { background: #e74c3c; border-color: #ffeb3b; color: white;} 
-        .cancel-btn { background: #8b0000; color: #fff; border-color: #ff4444; }
-        .delay-row { display: flex; justify-content: space-between; align-items: center; margin: 8px 5%; background: #333; padding: 6px 12px; border-radius: 8px; }
-        .delay-label { font-size: 15px; font-weight: bold;}
-        .delay-btn { background: #555; color: white; border: none; padding: 6px 16px; font-size: 18px; border-radius: 5px; font-weight: bold; cursor: pointer;}
-        .delay-val { font-size: 16px; font-weight: bold; width: 45px; display: inline-block; text-align: center; color: #00d2ff;}
-        #vol-bar-container { width: 90%; height: 18px; background: #444; margin: 12px auto 4px; border-radius: 9px; overflow: hidden; }
-        #vol-bar { width: 0%; height: 100%; background: #0f0; transition: width 0.05s, background 0.2s; }
-        #ai-confidence { font-size: 16px; font-weight: bold; color: #0f0; margin: 4px 0; min-height: 20px; }
-        #label-scores { font-size: 11px; color: #aaa; margin: 2px 0 4px; min-height: 14px; letter-spacing: 0.5px; }
-        #threshLabel { font-size: 14px; }
-        #threshVal { font-size: 13px; font-weight: bold; color: #ffeb3b; }
-        #md-display { font-size: 14px; color: #aaa; margin-top: 5px; font-weight: bold;}
-        #log { margin-top: 15px; color: #0f0; text-align: left; padding: 8px; font-size: 12px; background: #111; height: 150px; overflow-y: scroll; border: 1px solid #444;}
+        body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
+        .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
+        button { padding: 12px; font-size: 16px; border-radius: 8px; font-weight: bold; border:none; cursor: pointer;}
+        .top-btn { flex: 1; } .arm-btn { flex: 1 1 22%; background: #444; color: white;}
+        .arm-btn.active { background: #e74c3c; color: white; }
+        #arm-status { font-size: 18px; font-weight: bold; color: #aaa; margin: 8px 0; }
+        .delay-row { display: flex; justify-content: space-between; align-items: center; margin: 6px 5%; background: #333; padding: 6px 12px; border-radius: 8px; }
+        .delay-btn { background: #555; color: white; padding: 4px 14px; font-size: 18px; border-radius: 5px;}
+        #vol-bar-container { width: 90%; height: 18px; background: #444; margin: 10px auto 4px; border-radius: 9px; overflow: hidden; }
+        #vol-bar { width: 0%; height: 100%; background: #0f0; transition: width 0.05s; }
+        #ai-confidence { font-size: 16px; font-weight: bold; color: #0f0; margin: 4px 0; }
+        #label-scores { font-size: 11px; color: #aaa; margin-bottom: 6px; }
+        #log { margin-top: 10px; color: #0f0; text-align: left; padding: 8px; font-size: 12px; background: #111; height: 130px; overflow-y: scroll; border: 1px solid #444;}
     </style>
 </head>
 <body>
 
-    <h2>AI Puller V22 (WASM Fix)</h2>
+    <h2>AI Puller V23 (WASM Memory Fix)</h2>
     
-    <div class="top-row">
-        <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
-        <button id="listenBtn" class="top-btn" style="background: #28A745; color: white;">Turn On Mic</button>
+    <div class="row">
+        <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
+        <button id="listenBtn" class="top-btn" style="background:#28A745;color:white;">Turn On Mic</button>
     </div>
-    <div class="top-row">
-        <button id="vmBtn" class="top-btn" style="background: #9b59b6; color: white;">Mode: VOICE</button>
-        <button id="syncBtn" class="top-btn" style="background: #17a2b8; color: white;">Sync: ON</button>
-    </div>
-    <div class="top-row">
-        <button id="aiBtn" class="top-btn" style="background: #27ae60; color: white;">AI: ON</button>
-        <button id="dumpBtn" class="top-btn" style="background: #e67e22; color: white;">🔍 Dump</button>
+    <div class="row">
+        <button id="vmBtn" class="top-btn" style="background:#9b59b6;color:white;">Mode: VOICE</button>
+        <button id="syncBtn" class="top-btn" style="background:#17a2b8;color:white;">Sync: ON</button>
     </div>
     
     <div id="arm-status">SAFE / DISARMED</div>
 
-    <div id="arm-panel">
+    <div class="row" id="arm-panel">
         <button id="btn-H" class="arm-btn" onclick="setMode('H')">H</button>
         <button id="btn-L" class="arm-btn" onclick="setMode('L')">L</button>
         <button id="btn-D" class="arm-btn" onclick="setMode('D')">D</button>
@@ -54,54 +43,44 @@
         <button id="btn-HL" class="arm-btn" onclick="setMode('HL')">HL</button>
         <button id="btn-LH" class="arm-btn" onclick="setMode('LH')">LH</button>
         <button id="btn-T" class="arm-btn" onclick="setMode('T')">T (H)</button>
-        <button id="btn-CANCEL" class="arm-btn cancel-btn" onclick="cancelMode()">CANCEL</button>
+        <button id="btn-CANCEL" class="arm-btn" style="background:#8b0000;" onclick="cancelMode()">CANCEL</button>
     </div>
 
-    <div class="delay-row">
-        <span class="delay-label">Delay (D):</span>
-        <div>
-            <button class="delay-btn" onclick="adjDelay('D', -0.1)">-</button>
-            <span class="delay-val" id="val-D">0.0s</span>
-            <button class="delay-btn" onclick="adjDelay('D', 0.1)">+</button>
-        </div>
+    <div class="delay-row"><b>Delay (D):</b>
+        <div><button class="delay-btn" onclick="adjDelay('D', -0.1)">-</button> <b id="val-D" style="color:#00d2ff;width:40px;display:inline-block;">0.0s</b> <button class="delay-btn" onclick="adjDelay('D', 0.1)">+</button></div>
     </div>
-    <div class="delay-row">
-        <span class="delay-label">Dbl Dly (DD):</span>
-        <div>
-            <button class="delay-btn" onclick="adjDelay('DD', -0.1)">-</button>
-            <span class="delay-val" id="val-DD">0.0s</span>
-            <button class="delay-btn" onclick="adjDelay('DD', 0.1)">+</button>
-        </div>
+    <div class="delay-row"><b>Dbl Dly (DD):</b>
+        <div><button class="delay-btn" onclick="adjDelay('DD', -0.1)">-</button> <b id="val-DD" style="color:#00d2ff;width:40px;display:inline-block;">0.0s</b> <button class="delay-btn" onclick="adjDelay('DD', 0.1)">+</button></div>
     </div>
 
     <div id="vol-bar-container"><div id="vol-bar"></div></div>
     <div id="ai-confidence">AI: Waiting for engine...</div>
     <div id="label-scores">—</div>
 
-    <label id="threshLabel" for="threshSlider">AI Threshold %: <span id="threshVal">40</span></label><br>
-    <input type="range" id="threshSlider" min="5" max="95" value="40" style="width: 80%; margin-top: 5px;">
+    <label>AI Confidence Trigger %: <b id="threshVal" style="color:#ffeb3b;">40</b></label><br>
+    <input type="range" id="threshSlider" min="5" max="95" value="40" style="width:80%; margin-top:5px;">
 
-    <div style="margin:8px 3%;">
-        <button id="recBtn" class="top-btn" style="background:#c0392b;color:white;width:48%;font-size:14px;padding:8px;">
-            ⏺ Record &amp; Share WAV
-        </button>
-    </div>
-
-    <div id="md-display">Mute Delay (MD): 500ms</div>
+    <div id="md-display" style="color:#aaa; font-weight:bold; margin-top:8px;">Mute Delay: 500ms</div>
     <div id="log">--- Debug Log ---<br></div>
 
 <script>
+    // --- STATE VARIABLES ---
     const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
     const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
     const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
-
+    
     let bleDevice, bleCharacteristic, bleTxCharacteristic;
     let isBleConnected = false;
-    let micState = 0; let isMicActive = false; let wasMicActiveBeforeSleep = false;
-    let audioContext, audioStream, animId;
-    let classifierInitialized = false; let aiProcessor = null; let audioDataBuffer =[]; let wavCaptureBuffer = null;
-    let threshold = 40; let isSyncEnabled = true; let isVoiceMode = true; let armedMode = null;
-    let hlStep = 0; let lastHouse = 'H'; let dVal = 0.0; let ddVal = 0.0; let muteDelay = 500;
+
+    let micState = 0; // 0=ready, 1=fired/locked, 2=wait for quiet
+    let isMicActive = false, wasMicActiveBeforeSleep = false;
+    let audioContext, audioStream, animId, aiProcessor;
+    let audioDataBuffer =[];
+    
+    let threshold = 40;
+    let isSyncEnabled = true, isVoiceMode = true;
+    let armedMode = null, hlStep = 0, lastHouse = 'H';
+    let dVal = 0.0, ddVal = 0.0, muteDelay = 500;
 
     function logMsg(msg) {
         const logDiv = document.getElementById('log');
@@ -113,112 +92,94 @@
     };
 
     // =========================================================
-    // EDGE IMPULSE ENGINE (FIXED RACE CONDITION)
+    // EDGE IMPULSE ENGINE (BULLETPROOF INIT & HEAPF32 FIX)
     // =========================================================
-    let isAiEnabled = true; let eiClassifier = null; let targetLabel = "pull"; 
+    let classifierReady = false;
 
-    class EdgeImpulseClassifier {
-        _initialized = false;
-        init() {
-            return new Promise((resolve) => {
-                // FIXED: Direct check if the C++ function is already mapped
-                if (window.Module && typeof window.Module.run_classifier === 'function') {
-                    this._initialized = true;
-                    resolve();
-                    return;
-                }
-                const prev = window.Module ? window.Module.onRuntimeInitialized : null;
-                window.Module = window.Module || {};
-                window.Module.onRuntimeInitialized = () => {
-                    if (typeof prev === 'function') prev();
-                    this._initialized = true;
-                    resolve();
-                };
-            });
-        }
-        classify(rawData, debug = false) {
-            if (!this._initialized) throw new Error('Not initialized');
-            const obj = this._arrayToHeap(rawData);
-            let ret = Module.run_classifier(obj.buffer.byteOffset, rawData.length, debug);
-            Module._free(obj.ptr);
-            if (ret.result !== 0) throw new Error('failed: ' + ret.result);
-            let out = { anomaly: ret.anomaly, results:[] };
-            for (let i=0; i<ret.size(); i++) { let c = ret.get(i); out.results.push({label:c.label, value:c.value}); }
-            return out;
-        }
-        _arrayToHeap(data) {
-            const f32 = new Float32Array(data);
-            const nBytes = f32.length * f32.BYTES_PER_ELEMENT;
-            const ptr = Module._malloc(nBytes);
-            const heap = new Uint8Array(Module.HEAPU8.buffer, ptr, nBytes);
-            heap.set(new Uint8Array(f32.buffer));
-            return { ptr, buffer: heap };
-        }
+    // Bulletproof polling initializer (Fixes "Waiting for engine...")
+    function initAI() {
+        logMsg("Initializing AI Engine...");
+        let attempts = 0;
+        let checkReady = setInterval(() => {
+            attempts++;
+            if (window.Module && typeof window.Module.run_classifier === 'function') {
+                clearInterval(checkReady);
+                classifierReady = true;
+                logMsg("✅ AI Engine Ready!");
+                document.getElementById('ai-confidence').innerText = "AI Confidence: Listening...";
+            } else if (attempts > 50) { // 5 seconds timeout
+                clearInterval(checkReady);
+                logMsg("❌ AI Engine Failed to Load.");
+                document.getElementById('ai-confidence').innerText = "AI Failed - Volume Mode Active";
+            }
+        }, 100);
     }
+    initAI();
 
-    function dumpModule() {
-        if (!window.Module) { logMsg("❌ window.Module undefined"); return; }
-        logMsg("📦 Ready=" + classifierInitialized);
-        if (eiClassifier && classifierInitialized) {
-            try {
-                let r = eiClassifier.classify(new Float32Array(16000), false);
-                logMsg("🔬 Test result: " + JSON.stringify(r).substring(0, 200));
-            } catch(e) { logMsg("🔬 Test error: " + e); }
-        }
-    }
-
-    async function initEiClassifier() {
+    // Runs the Float32Array through the WASM model safely (Fixes "82% Noise" memory bug)
+    function classifyAudio(float32Array) {
+        if (!classifierInitialized) return null;
         try {
-            eiClassifier = new EdgeImpulseClassifier();
-            await eiClassifier.init();
-            classifierInitialized = true;
-            logMsg("✅ AI Engine Ready!");
-            document.getElementById('ai-confidence').innerText = "AI Confidence: Listening...";
-        } catch(e) {
-            logMsg("❌ AI init failed: " + e);
-            document.getElementById('ai-confidence').innerText = "AI Failed - Volume Mode Active";
+            // Allocate WASM memory
+            const ptr = Module._malloc(float32Array.length * 4);
+            // Copy floats safely into HEAPF32
+            Module.HEAPF32.set(float32Array, ptr >> 2);
+            
+            // Run inference
+            let ret = Module.run_classifier(ptr, float32Array.length, false);
+            Module._free(ptr); // Free memory to prevent leaks
+            
+            if (ret.result !== 0) return null;
+
+            // Extract results
+            let out =[];
+            for (let i = 0; i < ret.size(); i++) {
+                let c = ret.get(i);
+                out.push({ label: c.label, value: c.value });
+            }
+            return out;
+        } catch (e) {
+            logMsg("Inference Error: " + e);
+            return null;
         }
     }
-    initEiClassifier();
 
     function runAiInference(dataArray) {
-        if (!classifierInitialized || !eiClassifier || !isAiEnabled) return;
-        try {
-            let result = eiClassifier.classify(dataArray, false);
-            if (!result || !result.results || result.results.length === 0) return;
+        if (!classifierReady) return;
+        
+        let results = classifyAudio(dataArray);
+        if (!results) return;
 
-            if (!runAiInference._lastLog || Date.now() - runAiInference._lastLog > 2000) {
-                runAiInference._lastLog = Date.now();
-                logMsg("🔬 " + result.results.map(r => r.label + "=" + Math.round(r.value*100) + "%").join("  "));
-            }
+        // Update scores string (e.g. noise: 12%, pull: 88%)
+        let scoreStr = results.map(r => r.label + ":" + Math.round(r.value*100) + "%").join("  ");
+        document.getElementById('label-scores').innerText = scoreStr;
 
-            document.getElementById('label-scores').innerText = result.results.map(r => r.label + ":" + Math.round(r.value*100) + "%").join("  ");
+        let pullScore = null;
+        for (let r of results) {
+            if (r.label.toLowerCase() === "pull") { pullScore = r.value; break; }
+        }
+        
+        if (pullScore === null) {
+            // Fallback: If "pull" label isn't found, just grab the first label
+            pullScore = results[0].value; 
+        }
 
-            let triggerScore = null; let triggerLabelName = '';
-            for (let r of result.results) {
-                if (r.label.toLowerCase() === targetLabel.toLowerCase()) { triggerScore = r.value; triggerLabelName = r.label; break; }
-            }
-            if (triggerScore === null) return;
+        let pct = Math.round(pullScore * 100);
+        let triggerLevel = threshold / 100;
 
-            let pct = Math.round(triggerScore * 100);
-            let aiThreshold = threshold / 100;
+        document.getElementById('ai-confidence').innerText = "AI Confidence: " + pct + "%";
+        document.getElementById('ai-confidence').style.color = (pullScore >= triggerLevel) ? "#f00" : "#0f0";
 
-            document.getElementById('ai-confidence').innerText = "AI[" + triggerLabelName + "]: " + pct + "%";
-            document.getElementById('ai-confidence').style.color = (triggerScore >= aiThreshold) ? "#f00" : "#0f0";
-
-            if (triggerScore >= aiThreshold && isVoiceMode) {
-                if (micState === 0 && armedMode) processVoiceTrigger(pct, true);
-            } else if (micState === 2 && triggerScore < (aiThreshold * 0.5)) {
-                micState = 0; document.getElementById('vol-bar').style.background = "#0f0";
-            }
-        } catch (err) {
-            if (!runAiInference._errCount) runAiInference._errCount = 0;
-            if (++runAiInference._errCount <= 3) logMsg("⚠️ Inference error: " + err);
+        if (pullScore >= triggerLevel && isVoiceMode) {
+            if (micState === 0 && armedMode) processVoiceTrigger(pct, true);
+        } else if (micState === 2 && pullScore < (triggerLevel * 0.5)) {
+            micState = 0;
+            document.getElementById('vol-bar').style.background = "#0f0";
         }
     }
 
     // =========================================================
-    // AUDIO PROCESSING
+    // AUDIO PIPELINE
     // =========================================================
     async function startMic() {
         try {
@@ -243,38 +204,41 @@
 
             aiProcessor.onaudioprocess = function(e) {
                 if (!isMicActive) return;
-                const rawChunk = e.inputBuffer.getChannelData(0);
-                let chunk16k = rawChunk;
                 
+                const inputData = e.inputBuffer.getChannelData(0);
+                let chunk16k = inputData;
+                
+                // Downsample if iOS forces 44.1kHz or 48kHz
                 if (audioContext.sampleRate !== 16000) {
                     const ratio = audioContext.sampleRate / 16000;
-                    const newLen = Math.round(rawChunk.length / ratio);
+                    const newLen = Math.round(inputData.length / ratio);
                     chunk16k = new Float32Array(newLen);
-                    for (let i = 0; i < newLen; i++) chunk16k[i] = rawChunk[Math.floor(i * ratio)];
+                    for (let i = 0; i < newLen; i++) chunk16k[i] = inputData[Math.floor(i * ratio)];
                 }
 
+                // DC Offset removal
                 let mean = 0;
                 for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i];
                 mean /= chunk16k.length;
 
                 for (let i = 0; i < chunk16k.length; i++) {
                     let rawVal = chunk16k[i] - mean;
-                    if (wavCaptureBuffer !== null) {
-                        let wVal = rawVal * 2.0; 
-                        if (wVal > 1) wVal = 1; if (wVal < -1) wVal = -1;
-                        wavCaptureBuffer.push(wVal);
-                    }
+                    
                     if (micState !== 1) {
+                        // FIX: Edge Impulse expects 16-bit PCM values (-32768 to 32767) but inside a Float32Array!
+                        // We multiply by 32768.0 and add a 2x gain boost for AirPod mics.
                         let aiVal = rawVal * 32768.0 * 2.0; 
-                        if (aiVal > 32767) aiVal = 32767; if (aiVal < -32768) aiVal = -32768;
+                        if (aiVal > 32767) aiVal = 32767; 
+                        if (aiVal < -32768) aiVal = -32768;
                         audioDataBuffer.push(aiVal);
                     }
                 }
 
-                const FRAME_SIZE = 16000;
-                if (micState !== 1 && audioDataBuffer.length >= FRAME_SIZE) {
-                    const slice = new Float32Array(audioDataBuffer.slice(0, FRAME_SIZE));
-                    if (classifierInitialized) runAiInference(slice);
+                // AI expects exactly 1 second (16000 samples)
+                if (micState !== 1 && audioDataBuffer.length >= 16000) {
+                    const slice = new Float32Array(audioDataBuffer.slice(0, 16000));
+                    if (classifierReady) runAiInference(slice);
+                    // Slide the window forward by 4000 samples (250ms overlap)
                     audioDataBuffer = audioDataBuffer.slice(4000); 
                 }
             };
@@ -282,18 +246,20 @@
             function checkVolume() {
                 if (!isMicActive) return;
                 analyser.getByteFrequencyData(freqData);
-                let sum = 0; for (let i = 0; i < freqData.length; i++) sum += freqData[i];
+                let sum = 0; for(let i=0; i<freqData.length; i++) sum += freqData[i];
                 let avgVol = sum / freqData.length;
                 document.getElementById('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
 
-                if (!classifierInitialized || !isAiEnabled) {
+                // Fallback if AI isn't loaded
+                if (!classifierReady) {
                     if (micState === 0 && avgVol > threshold && isVoiceMode) processVoiceTrigger(avgVol, false);
                     else if (micState === 2 && avgVol < (threshold * 0.8)) { micState = 0; document.getElementById('vol-bar').style.background = "#0f0"; }
                 }
                 animId = requestAnimationFrame(checkVolume);
             }
             checkVolume();
-            logMsg("✅ Mic successfully activated!");
+            logMsg("✅ Mic Activated (16kHz).");
+
         } catch (err) { logMsg("Mic Error: " + err); stopMic(true); }
     }
 
@@ -302,73 +268,48 @@
         if (audioStream) audioStream.getTracks().forEach(t => t.stop());
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
         if (animId) cancelAnimationFrame(animId);
+        
         audioDataBuffer =[]; isMicActive = false; micState = 0;
+        
         if (resetUI) {
             document.getElementById('listenBtn').innerText = "Turn On Mic";
             document.getElementById('listenBtn').style.background = "#28A745";
             document.getElementById('vol-bar').style.background = "#0f0";
             document.getElementById('vol-bar').style.width = "0%";
-            logMsg("Mic off.");
+            logMsg("Mic Muted.");
         }
     }
 
     document.getElementById('listenBtn').addEventListener('click', async () => {
-        if (isMicActive || wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; stopMic(true); } else { wasMicActiveBeforeSleep = false; startMic(); }
+        if (isMicActive || wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; stopMic(true); }
+        else { wasMicActiveBeforeSleep = false; startMic(); }
     });
 
-    document.getElementById('recBtn').addEventListener('click', () => {
-        if (!isMicActive) { logMsg("⚠️ Turn on mic first"); return; }
-        const btn = document.getElementById('recBtn');
-        wavCaptureBuffer =[]; btn.innerText = "🔴 Recording 3s..."; btn.disabled = true;
-        setTimeout(async () => {
-            const captured = wavCaptureBuffer ? wavCaptureBuffer.slice(0, 48000) :[];
-            wavCaptureBuffer = null; btn.innerText = "⏺ Record & Share WAV"; btn.disabled = false;
-            await downloadWav(captured, 16000);
-        }, 3500);
-    });
-
-    function buildWavBlob(samples, sr) {
-        const buf = new ArrayBuffer(44 + samples.length * 2), view = new DataView(buf);
-        const writeStr = (off, str) => { for(let i=0;i<str.length;i++) view.setUint8(off+i, str.charCodeAt(i)); };
-        writeStr(0, 'RIFF'); view.setUint32(4, 36 + samples.length * 2, true); writeStr(8, 'WAVE');
-        writeStr(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-        view.setUint32(24, sr, true); view.setUint32(28, sr * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-        writeStr(36, 'data'); view.setUint32(40, samples.length * 2, true);
-        for (let i=0; i<samples.length; i++) { let s = Math.max(-1, Math.min(1, samples[i])); view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true); }
-        return new Blob([buf], { type: 'audio/wav' });
-    }
-
-    async function downloadWav(samples, sr) {
-        const blob = buildWavBlob(samples, sr); const fileName = 'ei-sample-' + Date.now() + '.wav';
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: 'audio/wav' })] })) {
-            try { await navigator.share({ files:[new File([blob], fileName, { type: 'audio/wav' })] }); return; } catch(e) {}
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            if (isMicActive) { wasMicActiveBeforeSleep = true; stopMic(false); document.getElementById('listenBtn').innerText = "Mic Paused 💤"; }
+        } else {
+            if (wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; startMic(); }
         }
-        const url = URL.createObjectURL(blob); window.open(url, '_blank'); setTimeout(() => URL.revokeObjectURL(url), 30000);
-    }
+    });
 
     // =========================================================
-    // UI, BLE & TRIGGERS
+    // UI, BLE & LOGIC
     // =========================================================
     document.getElementById('syncBtn').addEventListener('click', () => {
-        isSyncEnabled = !isSyncEnabled; document.getElementById('syncBtn').innerText = isSyncEnabled ? "Sync: ON" : "Sync: OFF";
+        isSyncEnabled = !isSyncEnabled; 
+        document.getElementById('syncBtn').innerText = isSyncEnabled ? "Sync: ON" : "Sync: OFF";
         document.getElementById('syncBtn').style.background = isSyncEnabled ? "#17a2b8" : "#6c757d";
     });
 
-    document.getElementById('vmBtn').addEventListener('click', () => { setVoiceMode(!isVoiceMode, false); });
-    document.getElementById('dumpBtn').addEventListener('click', dumpModule);
-    document.getElementById('aiBtn').addEventListener('click', () => {
-        isAiEnabled = !isAiEnabled; const btn = document.getElementById('aiBtn');
-        if (isAiEnabled) { btn.innerText = "AI: ON"; btn.style.background = "#27ae60"; } 
-        else { btn.innerText = "AI: OFF (Vol)"; btn.style.background = "#6c757d"; }
-    });
-
-    function setVoiceMode(voiceEnabled, fromSync = false) {
-        isVoiceMode = voiceEnabled; const btn = document.getElementById('vmBtn');
-        if (isVoiceMode) { btn.innerText = "Mode: VOICE"; btn.style.background = "#9b59b6"; } 
-        else { btn.innerText = "Mode: MANUAL"; btn.style.background = "#fd7e14"; cancelMode(true); }
+    document.getElementById('vmBtn').addEventListener('click', () => {
+        isVoiceMode = !isVoiceMode;
+        document.getElementById('vmBtn').innerText = isVoiceMode ? "Mode: VOICE" : "Mode: MANUAL";
+        document.getElementById('vmBtn').style.background = isVoiceMode ? "#9b59b6" : "#fd7e14";
+        if (!isVoiceMode) cancelMode(true);
         updateArmUI();
-        if (!fromSync && isBleConnected && isSyncEnabled) sendBLECmd(isVoiceMode ? "MODE:VOICE" : "MODE:MANUAL", true);
-    }
+        if (isBleConnected && isSyncEnabled) sendBLECmd(isVoiceMode ? "MODE:VOICE" : "MODE:MANUAL", true);
+    });
 
     window.adjDelay = function(type, amt) {
         if (!isBleConnected) return;
@@ -383,59 +324,137 @@
         if (!isVoiceMode) { as.innerText = "MANUAL MODE (Tap to Fire)"; as.style.color = "#fd7e14"; return; }
         if (armedMode) document.getElementById('btn-' + armedMode).classList.add('active');
         if (!armedMode) { as.innerText = "SAFE / DISARMED"; as.style.color = "#aaa"; }
-        else { as.style.color = "#ff4444"; as.innerText = "ARMED: " + armedMode; }
+        else {
+            as.style.color = "#ff4444";
+            if      (armedMode === 'HL') as.innerText = hlStep === 0 ? "ARMED: High -> Low" : "ARMED: Now Pulling Low";
+            else if (armedMode === 'LH') as.innerText = hlStep === 0 ? "ARMED: Low -> High" : "ARMED: Now Pulling High";
+            else if (armedMode === 'T')  as.innerText = "REPEATING: " + lastHouse;
+            else                         as.innerText = "ARMED: " + armedMode;
+        }
     }
 
     window.cancelMode = function(fromSync = false) {
-        armedMode = null; hlStep = 0; micState = 0; document.getElementById('vol-bar').style.background = "#0f0"; updateArmUI();
+        armedMode = null; hlStep = 0; micState = 0; 
+        document.getElementById('vol-bar').style.background = "#0f0"; 
+        document.getElementById('md-display').style.color = "#aaa";
+        updateArmUI();
         if (!fromSync && isBleConnected && isSyncEnabled) sendBLECmd("MODE:CANCEL", true);
     };
 
     window.setMode = function(mode, fromSync = false) {
         if (!isVoiceMode && !fromSync) {
-            let cmd = ''; if (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; } else if (mode==='D') { cmd='D1H'; hlStep=0; lastHouse='D'; }
-            if (cmd) { sendBLECmd(cmd); if (isSyncEnabled) sendBLECmd("MODE:MAN_UPDATE:"+lastHouse+":"+hlStep, true); updateArmUI(); }
+            let cmd = '';
+            if      (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; }
+            else if (mode==='D')  { cmd='D1H'; hlStep=0; lastHouse='D'; }
+            else if (mode==='DR') { cmd='D1L'; hlStep=0; lastHouse='DR'; }
+            else if (mode==='HL') { lastHouse='HL'; cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+            else if (mode==='LH') { lastHouse='LH'; cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
+            else if (mode==='T') {
+                if      (lastHouse==='HL') { cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+                else if (lastHouse==='LH') { cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
+                else if (lastHouse==='D')  cmd='D1H';
+                else if (lastHouse==='DR') cmd='D1L';
+                else cmd=lastHouse;
+            }
+            if (cmd) {
+                sendBLECmd(cmd);
+                if (isSyncEnabled) sendBLECmd("MODE:MAN_UPDATE:"+lastHouse+":"+hlStep, true);
+                const b = document.getElementById('btn-'+mode);
+                if (b) { b.classList.add('active'); setTimeout(()=>b.classList.remove('active'),200); }
+                updateArmUI();
+            }
             return;
         }
-        if (!fromSync) { if (armedMode===mode) armedMode=null; else { armedMode=mode; if(mode!=='T'&&mode!=='CANCEL') lastHouse=mode; } } 
-        else { armedMode=mode; if(mode!=='T'&&mode!==null&&mode!=='CANCEL') lastHouse=mode; }
+        if (!fromSync) {
+            if (armedMode===mode) armedMode=null;
+            else { armedMode=mode; if(mode!=='T'&&mode!=='CANCEL') lastHouse=mode; }
+        } else {
+            armedMode=mode; if(mode!=='T'&&mode!==null&&mode!=='CANCEL') lastHouse=mode;
+        }
         hlStep=0; updateArmUI();
         if (!fromSync&&isBleConnected&&isSyncEnabled&&isVoiceMode) sendBLECmd(armedMode?"MODE:"+armedMode+":"+lastHouse:"MODE:CANCEL", true);
     };
 
+    // BLE Connect
     document.getElementById('connectBtn').addEventListener('click', async () => {
         if (isBleConnected) { if (bleDevice?.gatt.connected) bleDevice.gatt.disconnect(); return; }
         try {
+            logMsg("Searching...");
             bleDevice = await navigator.bluetooth.requestDevice({ filters:[{name:'BLUE Puller'}], optionalServices:[SERVICE_UUID] });
-            bleDevice.addEventListener('gattserverdisconnected', handleBleDisconnect);
+            bleDevice.addEventListener('gattserverdisconnected', () => {
+                isBleConnected=false; document.getElementById('connectBtn').innerText="Connect BLE"; document.getElementById('connectBtn').style.background="#007BFF"; logMsg("BLE Disconnected.");
+            });
             const server  = await bleDevice.gatt.connect();
             const service = await server.getPrimaryService(SERVICE_UUID);
-            bleCharacteristic = await service.getCharacteristic(CHAR_RX_UUID);
+            bleCharacteristic   = await service.getCharacteristic(CHAR_RX_UUID);
             bleTxCharacteristic = await service.getCharacteristic(CHAR_TX_UUID);
             await bleTxCharacteristic.startNotifications();
-            bleTxCharacteristic.addEventListener('characteristicvaluechanged', handleBleNotifications);
+            bleTxCharacteristic.addEventListener('characteristicvaluechanged', (e) => {
+                let msg = new TextDecoder('utf-8').decode(e.target.value).trim();
+                if (!msg) return;
+                
+                if (msg.startsWith("MODE:")) {
+                    if (!isSyncEnabled) return;
+                    if (msg==="MODE:VOICE")  { setVoiceMode(true,true);  return; }
+                    if (msg==="MODE:MANUAL") { setVoiceMode(false,true); return; }
+                    let p=msg.split(":"); let st=p[1];
+                    if (st==="MAN_UPDATE") { lastHouse=p[2]; if(p[3]) hlStep=parseInt(p[3]); updateArmUI(); return; }
+                    if (p[2]) lastHouse=p[2];
+                    if (st==="CANCEL") cancelMode(true); else setMode(st,true);
+                    return;
+                }
+                if (msg.includes("STATUS:")) {
+                    let d=msg.match(/Delay: ([\d.]+)/), dd=msg.match(/Dbl: ([\d.]+)/), md=msg.match(/MD: (\d+)/);
+                    if(d) { dVal=parseFloat(d[1]); document.getElementById('val-D').innerText=dVal.toFixed(1)+"s"; }
+                    if(dd) { ddVal=parseFloat(dd[1]); document.getElementById('val-DD').innerText=ddVal.toFixed(1)+"s"; }
+                    if(md) { muteDelay=parseInt(md[1]); document.getElementById('md-display').innerText="Mute Delay: "+muteDelay+"ms"; }
+                }
+                logMsg("📡 [TRAP]: "+msg);
+                if      (msg==="CMD: High")                        { lastHouse='H';  updateArmUI(); }
+                else if (msg==="CMD: Low")                         { lastHouse='L';  updateArmUI(); }
+                else if (msg==="CMD: D1H"||msg==="CMD: Doubles")   { lastHouse='D';  updateArmUI(); }
+                else if (msg==="CMD: D1L")                         { lastHouse='DR'; updateArmUI(); }
+            });
             isBleConnected = true;
             document.getElementById('connectBtn').innerText = "Disconnect BLE"; document.getElementById('connectBtn').style.background = "#dc3545";
             setTimeout(()=>sendBLECmd("?"),500);
         } catch(e) { logMsg("BLE Error: "+e); }
     });
 
-    function handleBleDisconnect() {
-        isBleConnected=false; document.getElementById('connectBtn').innerText="Connect BLE"; document.getElementById('connectBtn').style.background="#007BFF";
-    }
-
-    function handleBleNotifications(event) {
-        let msg = new TextDecoder('utf-8').decode(event.target.value).trim();
-        if (!msg) return;
-        if (msg==="GLOVE: CONNECTED") { sendBLECmd("ACK:GLOVE",true); if (isSyncEnabled) setTimeout(()=>sendBLECmd(isVoiceMode?"MODE:VOICE":"MODE:MANUAL",true),600); return; }
-        if (msg==="AH") { sendBLECmd("ACK:AH",true); setTimeout(()=>setMode('H',true),400); return; }
+    async function sendBLECmd(cmd, silent = false) {
+        if (bleCharacteristic && isBleConnected) {
+            try { await bleCharacteristic.writeValue(new TextEncoder().encode(cmd)); if (!silent) logMsg("🚀 SENT: '"+cmd+"'"); } catch(e) {}
+        }
     }
 
     async function processVoiceTrigger(level, isAi) {
         if (!armedMode || micState !== 0) return;
-        micState = 1; document.getElementById('vol-bar').style.background = "#f00";
-        let cmdToSend = armedMode === 'H' || armedMode === 'L' ? armedMode : 'D1H';
-        cancelMode(false); updateArmUI();
+        micState = 1;
+        document.getElementById('vol-bar').style.background = "#f00";
+        document.getElementById('md-display').style.color = "#ff4444";
+
+        let cmdToSend = '';
+        if      (armedMode === 'H' || armedMode === 'L') { cmdToSend = armedMode; cancelMode(false); }
+        else if (armedMode === 'D')  { cmdToSend = 'D1H'; cancelMode(false); }
+        else if (armedMode === 'DR') { cmdToSend = 'D1L'; cancelMode(false); }
+        else if (armedMode === 'HL') { if (hlStep === 0) { cmdToSend = 'H'; hlStep = 1; document.getElementById('arm-status').innerText = "ARMED: Now Pulling Low"; } else { cmdToSend = 'L'; hlStep = 0; cancelMode(false); } }
+        else if (armedMode === 'LH') { if (hlStep === 0) { cmdToSend = 'L'; hlStep = 1; document.getElementById('arm-status').innerText = "ARMED: Now Pulling High"; } else { cmdToSend = 'H'; hlStep = 0; cancelMode(false); } }
+        else if (armedMode === 'T')  {
+            if      (lastHouse === 'HL') { cmdToSend = (hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+            else if (lastHouse === 'LH') { cmdToSend = (hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
+            else if (lastHouse === 'D')  cmdToSend = 'D1H';
+            else if (lastHouse === 'DR') cmdToSend = 'D1L';
+            else cmdToSend = lastHouse;
+        }
+
+        updateArmUI();
         let totalLockout = (dVal * 1000) + muteDelay;
+        logMsg(`💥 FIRED! (${isAi?'AI ':'Vol '}${Math.round(level)}%) | Lockout: ${totalLockout}ms`);
         if (cmdToSend !== '') await sendBLECmd(cmdToSend);
-        setTimeout(() => { micState = 2; audioDataBuffer =
+
+        // CLEAR BUFFER to prevent rapid double-fire from old audio!
+        audioDataBuffer =[];
+
+        setTimeout(() => {
+            micState = 2;
+            audioDataBuffer =
