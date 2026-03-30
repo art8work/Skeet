@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V19.13</title>
+    <title>AI Skeet Puller V19.14</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- Load the Edge Impulse AI Engine (must be in same folder) -->
     <script src="edge-impulse-standalone.js"></script>
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V19.13 (Edge Impulse)</h2>
+    <h2>AI Puller V19.14 (Edge Impulse)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -319,17 +319,13 @@
             source.connect(aiProcessor);
             aiProcessor.connect(audioContext.destination);
 
-            aiProcessor.onaudioprocess = function(e) {
-               aiProcessor.onaudioprocess = function(e) {
+   aiProcessor.onaudioprocess = function(e) {
     if (!isMicActive || micState === 1) return;
 
     const inputData = e.inputBuffer.getChannelData(0);
 
-    // =========================================================
-    // FIX #2 — Downsample to 16kHz if browser ignores setting
-    // =========================================================
+    // Downsample if needed
     let downsampled = inputData;
-
     if (audioContext.sampleRate !== 16000) {
         const ratio = audioContext.sampleRate / 16000;
         const newLen = Math.round(inputData.length / ratio);
@@ -340,50 +336,28 @@
         }
     }
 
-    // =========================================================
-    // FIX #3 — Audio level debug (THIS is what you asked about)
-    // =========================================================
+    // Audio level debug
     let max = 0;
     for (let i = 0; i < downsampled.length; i++) {
         const val = Math.abs(downsampled[i]);
         if (val > max) max = val;
     }
-
     logMsg("Audio level: " + max.toFixed(3));
 
-    // =========================================================
-    // Push audio into rolling buffer
-    // =========================================================
+    // Push into buffer
     for (let i = 0; i < downsampled.length; i++) {
         audioDataBuffer.push(downsampled[i]);
     }
 
-    // =========================================================
-    // AI inference trigger (DO NOT CHANGE SIZE)
-    // =========================================================
+    // Run inference
     if (audioDataBuffer.length >= 16000) {
-
         if (classifierInitialized) {
             runAiInference(audioDataBuffer.slice(0, 16000));
         }
-
-        // Slide window (250ms overlap)
         audioDataBuffer = audioDataBuffer.slice(4000);
     }
 };
 
-
-
-
-                
-                for (let i = 0; i < inputData.length; i++) audioDataBuffer.push(inputData[i]);
-
-                // Accumulate 1 second (16000 samples) then infer with sliding window
-                if (audioDataBuffer.length >= 16000) {
-                if (classifierInitialized) runAiInference(audioDataBuffer.slice(0, 16000));
-                audioDataBuffer = audioDataBuffer.slice(4000);
-                 }
-            };
 
             // --- Volume animation loop (V18 style) ---
             function checkVolume() {
