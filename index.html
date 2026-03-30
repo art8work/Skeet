@@ -320,42 +320,57 @@
             aiProcessor.connect(audioContext.destination);
 
             aiProcessor.onaudioprocess = function(e) {
-                if (!isMicActive || micState === 1) return;
-                const inputData = e.inputBuffer.getChannelData(0);
+               aiProcessor.onaudioprocess = function(e) {
+    if (!isMicActive || micState === 1) return;
 
-// Downsample to 16kHz if needed
-let downsampled = inputData;
-if (audioContext.sampleRate !== 16000) {
-    const ratio = audioContext.sampleRate / 16000;
-    const newLen = Math.round(inputData.length / ratio);
-    downsampled = new Float32Array(newLen);
+    const inputData = e.inputBuffer.getChannelData(0);
 
-    for (let i = 0; i < newLen; i++) {
-        downsampled[i] = inputData[Math.floor(i * ratio)];
+    // =========================================================
+    // FIX #2 — Downsample to 16kHz if browser ignores setting
+    // =========================================================
+    let downsampled = inputData;
+
+    if (audioContext.sampleRate !== 16000) {
+        const ratio = audioContext.sampleRate / 16000;
+        const newLen = Math.round(inputData.length / ratio);
+        downsampled = new Float32Array(newLen);
+
+        for (let i = 0; i < newLen; i++) {
+            downsampled[i] = inputData[Math.floor(i * ratio)];
+        }
     }
-}
 
-
+    // =========================================================
+    // FIX #3 — Audio level debug (THIS is what you asked about)
+    // =========================================================
     let max = 0;
     for (let i = 0; i < downsampled.length; i++) {
-        if (Math.abs(downsampled[i]) > max) max = Math.abs(downsampled[i]);
+        const val = Math.abs(downsampled[i]);
+        if (val > max) max = val;
     }
+
     logMsg("Audio level: " + max.toFixed(3));
 
-    // Push audio into buffer
+    // =========================================================
+    // Push audio into rolling buffer
+    // =========================================================
     for (let i = 0; i < downsampled.length; i++) {
         audioDataBuffer.push(downsampled[i]);
     }
 
-    // Inference trigger (leave this as 16000!)
+    // =========================================================
+    // AI inference trigger (DO NOT CHANGE SIZE)
+    // =========================================================
     if (audioDataBuffer.length >= 16000) {
+
         if (classifierInitialized) {
             runAiInference(audioDataBuffer.slice(0, 16000));
         }
+
+        // Slide window (250ms overlap)
         audioDataBuffer = audioDataBuffer.slice(4000);
     }
 };
-
 
 
 
