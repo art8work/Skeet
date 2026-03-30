@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V19.19</title>
+    <title>AI Skeet Puller V19.20</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="edge-impulse-standalone.js"></script>
     <style>
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V19.19 (Edge Impulse)</h2>
+    <h2>AI Puller V19.20 (Edge Impulse)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -209,64 +209,90 @@
     initEiClassifier();
 
     // =========================================================
-    // INFERENCE  — no log spam; live display via DOM only
+    // INFERENCE
+    // Label name from model is unknown — we use the TOP scoring label
+    // and also show ALL labels live so user can see exact names + scores
     // =========================================================
+
+    // Set this to your exact label name after you see it in the log below.
+    // Leave as null to auto-detect (uses whichever label scores highest).
+    let targetLabel = null; // e.g. set to "Pull" or "pull" or "yes" once confirmed
+
     function runAiInference(dataArray) {
         if (!classifierInitialized || !eiClassifier || !isAiEnabled) return;
         try {
             let result = eiClassifier.classify(dataArray, false);
 
-            // ONE-TIME raw result log for debugging
-            if (!runAiInference._logged) {
-                runAiInference._logged = true;
-                logMsg("🔬 First result: " + JSON.stringify(result).substring(0, 300));
+            if (!result || !result.results || result.results.length === 0) {
+                logMsg("⚠️ Empty result from classifier");
+                return;
             }
 
-            // Find pull score + build live label display (DOM only — no logMsg)
-            let pullScore = null;
-            let scoreStr  = '';
-            if (result && result.results) {
-                scoreStr = result.results.map(r => {
-                    let pct = Math.round(r.value * 100);
-                    if (r.label.toLowerCase() === 'pull') pullScore = r.value;
-                    return r.label + ':' + pct + '%';
-                }).join('  ');
+            // Log raw result EVERY 3 seconds so label names are always visible
+            if (!runAiInference._lastLog || Date.now() - runAiInference._lastLog > 3000) {
+                runAiInference._lastLog = Date.now();
+                logMsg("🔬 Labels: " + result.results.map(r => r.label + "=" + Math.round(r.value*100) + "%").join("  "));
             }
-            // Update live scores display without touching the log
+
+            // Build live score display
+            let scoreStr = result.results.map(r => r.label + ":" + Math.round(r.value*100) + "%").join("  ");
             document.getElementById('label-scores').innerText = scoreStr;
 
-            if (pullScore === null) return;
+            // Find the target label score — auto-detect uses label[0] (first = positive class in EI)
+            // or whichever label matches targetLabel if set
+            let triggerScore = null;
+            let triggerLabelName = '';
 
-            let pct          = Math.round(pullScore * 100);
-            let aiThreshold  = threshold / 100;  // slider 5-95 → 0.05-0.95
+            if (targetLabel) {
+                // Use exact named label
+                for (let r of result.results) {
+                    if (r.label.toLowerCase() === targetLabel.toLowerCase()) {
+                        triggerScore = r.value;
+                        triggerLabelName = r.label;
+                        break;
+                    }
+                }
+            } else {
+                // Auto: use label[0] — in Edge Impulse the first label is usually
+                // the positive class you trained for. Log it so user can confirm.
+                triggerScore = result.results[0].value;
+                triggerLabelName = result.results[0].label;
+            }
 
-            document.getElementById('ai-confidence').innerText = "AI: pull=" + pct + "%  thresh=" + threshold + "%";
-            document.getElementById('ai-confidence').style.color = (pullScore >= aiThreshold) ? "#f00" : "#0f0";
+            if (triggerScore === null) {
+                logMsg("⚠️ Target label not found. Labels are: " + result.results.map(r=>r.label).join(", "));
+                return;
+            }
 
-            if (pullScore >= aiThreshold && isVoiceMode) {
+            let pct         = Math.round(triggerScore * 100);
+            let aiThreshold = threshold / 100;
+
+            document.getElementById('ai-confidence').innerText =
+                "AI [" + triggerLabelName + "]: " + pct + "%  (need " + threshold + "%)";
+            document.getElementById('ai-confidence').style.color = (triggerScore >= aiThreshold) ? "#f00" : "#0f0";
+
+            if (triggerScore >= aiThreshold && isVoiceMode) {
                 if (micState === 0 && armedMode) {
-                    // All conditions met — FIRE
                     processVoiceTrigger(pct, true);
                 } else {
-                    // Threshold exceeded but blocked — log exactly why (rate-limited)
                     if (!runAiInference._blockLog || Date.now() - runAiInference._blockLog > 1500) {
                         runAiInference._blockLog = Date.now();
                         let why = [];
-                        if (micState !== 0)  why.push("micState=" + micState + " (locked)");
-                        if (!armedMode)      why.push("NOT ARMED — tap H/L/D/etc first!");
-                        if (!isVoiceMode)    why.push("not in VOICE mode");
-                        logMsg("⚡ Threshold exceeded (" + pct + "%) but BLOCKED: " + why.join(", "));
+                        if (micState !== 0) why.push("micState=" + micState + " (locked/cooling)");
+                        if (!armedMode)     why.push("NOT ARMED — tap H/L/D/etc");
+                        if (!isVoiceMode)   why.push("not in VOICE mode");
+                        logMsg("⚡ " + pct + "% exceeds threshold but BLOCKED: " + why.join(", "));
                     }
                 }
-            } else if (micState === 2 && pullScore < (aiThreshold * 0.5)) {
+            } else if (micState === 2 && triggerScore < (aiThreshold * 0.5)) {
                 micState = 0;
                 document.getElementById('vol-bar').style.background = "#0f0";
-                logMsg("🟢 Quiet. Ready for next call.");
+                logMsg("🟢 Ready.");
             }
+
         } catch (err) {
-            // Rate-limit inference error logs so they don't spam
             if (!runAiInference._errCount) runAiInference._errCount = 0;
-            if (++runAiInference._errCount <= 3) logMsg("⚠️ Inference error: " + err);
+            if (++runAiInference._errCount <= 5) logMsg("⚠️ Inference error: " + err);
         }
     }
 
