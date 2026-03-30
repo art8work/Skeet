@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V19.18</title>
+    <title>AI Skeet Puller V19.19</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="edge-impulse-standalone.js"></script>
     <style>
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V19.18 (Edge Impulse)</h2>
+    <h2>AI Puller V19.19 (Edge Impulse)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -243,10 +243,22 @@
             document.getElementById('ai-confidence').innerText = "AI: pull=" + pct + "%  thresh=" + threshold + "%";
             document.getElementById('ai-confidence').style.color = (pullScore >= aiThreshold) ? "#f00" : "#0f0";
 
-            if (micState === 0 && pullScore >= aiThreshold && isVoiceMode) {
-                processVoiceTrigger(pct, true);
+            if (pullScore >= aiThreshold && isVoiceMode) {
+                if (micState === 0 && armedMode) {
+                    // All conditions met — FIRE
+                    processVoiceTrigger(pct, true);
+                } else {
+                    // Threshold exceeded but blocked — log exactly why (rate-limited)
+                    if (!runAiInference._blockLog || Date.now() - runAiInference._blockLog > 1500) {
+                        runAiInference._blockLog = Date.now();
+                        let why = [];
+                        if (micState !== 0)  why.push("micState=" + micState + " (locked)");
+                        if (!armedMode)      why.push("NOT ARMED — tap H/L/D/etc first!");
+                        if (!isVoiceMode)    why.push("not in VOICE mode");
+                        logMsg("⚡ Threshold exceeded (" + pct + "%) but BLOCKED: " + why.join(", "));
+                    }
+                }
             } else if (micState === 2 && pullScore < (aiThreshold * 0.5)) {
-                // Wait until confidence drops to 50% of threshold before re-arming
                 micState = 0;
                 document.getElementById('vol-bar').style.background = "#0f0";
                 logMsg("🟢 Quiet. Ready for next call.");
