@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V19.22</title>
+    <title>AI Skeet Puller V19.23</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="edge-impulse-standalone.js"></script>
     <style>
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V19.22 (Edge Impulse)</h2>
+    <h2>AI Puller V19.23 (Edge Impulse)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -383,6 +383,14 @@
 
                     if (classifierInitialized) runAiInference(processed);
 
+                    // Feed WAV capture buffer if recording is active
+                    // This runs AFTER downsampling so wavCaptureBuffer is always 16kHz
+                    if (wavCaptureBuffer !== null) {
+                        for (let i = 0; i < processed.length; i++) {
+                            wavCaptureBuffer.push(processed[i]);
+                        }
+                    }
+
                     // Slide the native buffer by 250ms worth of native samples
                     audioDataBuffer = audioDataBuffer.slice(slideNativeSamples);
                 }
@@ -679,52 +687,37 @@
     }
 
     // =========================================================
-    // WAV RECORDER — captures exactly what the model hears
-    // Download and compare to your Edge Impulse training samples
+    // WAV RECORDER — dedicated capture buffer, filled by onaudioprocess
+    // Completely separate from audioDataBuffer so it gets all samples
     // =========================================================
+    let wavCaptureBuffer = null; // Float32Array accumulator, non-null while recording
+
     document.getElementById('recBtn').addEventListener('click', () => {
         if (!isMicActive) { logMsg("⚠️ Turn on mic first"); return; }
         const btn = document.getElementById('recBtn');
-        btn.innerText = "⏺ Recording 3s...";
-        btn.disabled = true;
+        const CAPTURE_SAMPLES = 16000 * 3; // exactly 3 seconds at 16kHz post-downsample
 
-        // Capture 3 seconds of the processed 16kHz audio
-        const captureDuration = 3; // seconds
-        const captureSamples  = 16000 * captureDuration;
-        let captured = [];
-        let capturing = true;
+        // Start capture — onaudioprocess will fill wavCaptureBuffer
+        wavCaptureBuffer = [];
+        btn.innerText = "🔴 Recording 3s...";
+        btn.disabled  = true;
+        logMsg("⏺ Recording started — say 'pull' now...");
 
-        // Tap into the existing audioDataBuffer by snapshotting it
-        const captureInterval = setInterval(() => {
-            if (!capturing) return;
-            // Copy current buffer contents
-            captured = captured.concat(Array.from(audioDataBuffer));
-            if (captured.length >= captureSamples) {
-                capturing = false;
-                clearInterval(captureInterval);
-                const samples = captured.slice(0, captureSamples);
-                downloadWav(samples, 16000);
-                btn.innerText = "⏺ Record 3s Sample";
-                btn.disabled = false;
-                logMsg("✅ WAV downloaded — check what the model hears vs your training data");
+        // Stop after 3.5s (buffer may fill faster or slower depending on chunk sizes)
+        setTimeout(async () => {
+            const captured = wavCaptureBuffer ? wavCaptureBuffer.slice(0, CAPTURE_SAMPLES) : [];
+            wavCaptureBuffer = null; // stop capture
+            btn.innerText = "⏺ Record & Share WAV";
+            btn.disabled  = false;
+
+            if (captured.length < 1000) {
+                logMsg("⚠️ Captured only " + captured.length + " samples — mic may not be running");
+                return;
             }
-        }, 100);
-
-        // Timeout safety
-        setTimeout(() => {
-            if (capturing) {
-                capturing = false;
-                clearInterval(captureInterval);
-                if (captured.length > 0) {
-                    downloadWav(captured, 16000);
-                    logMsg("✅ WAV saved (" + captured.length + " samples)");
-                } else {
-                    logMsg("⚠️ No audio captured — speak while recording");
-                }
-                btn.innerText = "⏺ Record 3s Sample";
-                btn.disabled = false;
-            }
-        }, 4000);
+            logMsg("✅ Captured " + captured.length + " samples (" +
+                   (captured.length / 16000).toFixed(2) + "s) — sharing...");
+            await downloadWav(captured, 16000);
+        }, 3500);
     });
 
     function buildWavBlob(samples, sampleRate) {
