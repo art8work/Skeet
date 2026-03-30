@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V19.23</title>
+    <title>AI Skeet Puller V19.18</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="edge-impulse-standalone.js"></script>
     <style>
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V19.23 (Edge Impulse)</h2>
+    <h2>AI Puller V19.18 (Edge Impulse)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -112,6 +112,7 @@
     let classifierInitialized = false;
     let aiProcessor = null;
     let audioDataBuffer = [];
+    let wavCaptureBuffer = null; // set to [] when recording, null otherwise
 
     // Threshold is now a direct % (slider 5–95 maps to 0.05–0.95)
     let threshold = 40;
@@ -332,67 +333,54 @@
             source.connect(aiProcessor);
             aiProcessor.connect(audioContext.destination);
 
-            // Log actual sample rate once so we can confirm iOS behavior
-            logMsg("🎙️ Actual AudioContext sampleRate: " + audioContext.sampleRate + "Hz");
-
-            // How many NATIVE samples = 1 second of audio at 16kHz after downsampling
-            // If iOS runs at 44100, we need 44100 raw samples to produce 16000 downsampled
-            const nativeSampleRate  = audioContext.sampleRate;
-            const targetSampleRate  = 16000;
-            const needNativeSamples = (nativeSampleRate !== targetSampleRate)
-                ? Math.round(nativeSampleRate)          // 1 second worth of native samples
-                : 16000;
-            const slideNativeSamples = Math.round(needNativeSamples * 0.25); // slide 250ms
+            const nativeSampleRate = audioContext.sampleRate;
+            const targetSampleRate = 16000;
+            logMsg("🎙️ AudioContext sampleRate: " + nativeSampleRate + "Hz");
 
             aiProcessor.onaudioprocess = function(e) {
-                if (!isMicActive || micState === 1) return;
+                if (!isMicActive) return;
 
-                const inputData = e.inputBuffer.getChannelData(0);
+                const rawChunk = e.inputBuffer.getChannelData(0);
 
-                // Push raw native-rate samples into buffer
-                for (let i = 0; i < inputData.length; i++) {
-                    audioDataBuffer.push(inputData[i]);
+                // --- STEP 1: Downsample chunk to 16kHz ---
+                let chunk16k;
+                if (nativeSampleRate !== targetSampleRate) {
+                    const ratio  = nativeSampleRate / targetSampleRate;
+                    const newLen = Math.round(rawChunk.length / ratio);
+                    chunk16k     = new Float32Array(newLen);
+                    for (let i = 0; i < newLen; i++) {
+                        chunk16k[i] = rawChunk[Math.floor(i * ratio)];
+                    }
+                } else {
+                    chunk16k = new Float32Array(rawChunk);
                 }
 
-                // Once we have 1 full second of NATIVE samples, downsample then infer
-                if (audioDataBuffer.length >= needNativeSamples) {
-                    const nativeSlice = audioDataBuffer.slice(0, needNativeSamples);
+                // --- STEP 2: DC offset removal per chunk ---
+                let mean = 0;
+                for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i];
+                mean /= chunk16k.length;
+                for (let i = 0; i < chunk16k.length; i++) {
+                    chunk16k[i] -= mean;
+                    if (chunk16k[i] >  1) chunk16k[i] =  1;
+                    if (chunk16k[i] < -1) chunk16k[i] = -1;
+                }
 
-                    // Downsample to 16kHz if needed
-                    let processed;
-                    if (nativeSampleRate !== targetSampleRate) {
-                        const ratio  = nativeSampleRate / targetSampleRate;
-                        const newLen = 16000; // always exactly 16000 output samples
-                        processed    = new Float32Array(newLen);
-                        for (let i = 0; i < newLen; i++) {
-                            processed[i] = nativeSlice[Math.floor(i * ratio)];
-                        }
-                    } else {
-                        processed = new Float32Array(nativeSlice);
+                // --- STEP 3: Feed WAV capture (runs on EVERY chunk, always 16kHz) ---
+                if (wavCaptureBuffer !== null) {
+                    for (let i = 0; i < chunk16k.length; i++) {
+                        wavCaptureBuffer.push(chunk16k[i]);
                     }
+                }
 
-                    // DC offset removal on the downsampled data
-                    let mean = 0;
-                    for (let i = 0; i < processed.length; i++) mean += processed[i];
-                    mean /= processed.length;
-                    for (let i = 0; i < processed.length; i++) {
-                        processed[i] -= mean;
-                        if (processed[i] >  1) processed[i] =  1;
-                        if (processed[i] < -1) processed[i] = -1;
+                // --- STEP 4: Accumulate for inference (1-second sliding window) ---
+                if (micState !== 1) {
+                    for (let i = 0; i < chunk16k.length; i++) {
+                        audioDataBuffer.push(chunk16k[i]);
                     }
-
-                    if (classifierInitialized) runAiInference(processed);
-
-                    // Feed WAV capture buffer if recording is active
-                    // This runs AFTER downsampling so wavCaptureBuffer is always 16kHz
-                    if (wavCaptureBuffer !== null) {
-                        for (let i = 0; i < processed.length; i++) {
-                            wavCaptureBuffer.push(processed[i]);
-                        }
+                    if (audioDataBuffer.length >= 16000) {
+                        if (classifierInitialized) runAiInference(audioDataBuffer.slice(0, 16000));
+                        audioDataBuffer = audioDataBuffer.slice(4000); // slide 250ms
                     }
-
-                    // Slide the native buffer by 250ms worth of native samples
-                    audioDataBuffer = audioDataBuffer.slice(slideNativeSamples);
                 }
             };
 
@@ -690,8 +678,6 @@
     // WAV RECORDER — dedicated capture buffer, filled by onaudioprocess
     // Completely separate from audioDataBuffer so it gets all samples
     // =========================================================
-    let wavCaptureBuffer = null; // Float32Array accumulator, non-null while recording
-
     document.getElementById('recBtn').addEventListener('click', () => {
         if (!isMicActive) { logMsg("⚠️ Turn on mic first"); return; }
         const btn = document.getElementById('recBtn');
