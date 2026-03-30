@@ -78,12 +78,19 @@
 
     <div id="vol-bar-container"><div id="vol-bar"></div></div>
     <div id="ai-confidence">AI: Waiting for engine...</div>
-    <!-- Live scores for ALL labels — updated every inference, no log spam -->
     <div id="label-scores">—</div>
     <div id="ai-status-row">Engine not loaded</div>
 
     <label id="threshLabel" for="threshSlider">AI Threshold %: <span id="threshVal">40</span></label><br>
     <input type="range" id="threshSlider" min="5" max="95" value="40" style="width: 80%; margin-top: 5px;">
+
+    <!-- WAV capture: records exactly what the model hears so you can compare to training data -->
+    <div style="margin:8px 3%;">
+        <button id="recBtn" class="top-btn" style="background:#c0392b;color:white;width:48%;font-size:14px;padding:8px;">
+            ⏺ Record 3s Sample
+        </button>
+        <a id="wavLink" style="display:none"></a>
+    </div>
 
     <div id="md-display">Mute Delay (MD): 500ms</div>
     <div id="log">--- Debug Log ---<br></div>
@@ -669,6 +676,91 @@
         else if (msg==="CMD: Low")                         { lastHouse='L';  updateArmUI(); }
         else if (msg==="CMD: D1H"||msg==="CMD: Doubles")   { lastHouse='D';  updateArmUI(); }
         else if (msg==="CMD: D1L")                         { lastHouse='DR'; updateArmUI(); }
+    }
+
+    // =========================================================
+    // WAV RECORDER — captures exactly what the model hears
+    // Download and compare to your Edge Impulse training samples
+    // =========================================================
+    document.getElementById('recBtn').addEventListener('click', () => {
+        if (!isMicActive) { logMsg("⚠️ Turn on mic first"); return; }
+        const btn = document.getElementById('recBtn');
+        btn.innerText = "⏺ Recording 3s...";
+        btn.disabled = true;
+
+        // Capture 3 seconds of the processed 16kHz audio
+        const captureDuration = 3; // seconds
+        const captureSamples  = 16000 * captureDuration;
+        let captured = [];
+        let capturing = true;
+
+        // Tap into the existing audioDataBuffer by snapshotting it
+        const captureInterval = setInterval(() => {
+            if (!capturing) return;
+            // Copy current buffer contents
+            captured = captured.concat(Array.from(audioDataBuffer));
+            if (captured.length >= captureSamples) {
+                capturing = false;
+                clearInterval(captureInterval);
+                const samples = captured.slice(0, captureSamples);
+                downloadWav(samples, 16000);
+                btn.innerText = "⏺ Record 3s Sample";
+                btn.disabled = false;
+                logMsg("✅ WAV downloaded — check what the model hears vs your training data");
+            }
+        }, 100);
+
+        // Timeout safety
+        setTimeout(() => {
+            if (capturing) {
+                capturing = false;
+                clearInterval(captureInterval);
+                if (captured.length > 0) {
+                    downloadWav(captured, 16000);
+                    logMsg("✅ WAV saved (" + captured.length + " samples)");
+                } else {
+                    logMsg("⚠️ No audio captured — speak while recording");
+                }
+                btn.innerText = "⏺ Record 3s Sample";
+                btn.disabled = false;
+            }
+        }, 4000);
+    });
+
+    function downloadWav(samples, sampleRate) {
+        // Build a proper 16-bit PCM WAV file
+        const numSamples = samples.length;
+        const buffer     = new ArrayBuffer(44 + numSamples * 2);
+        const view       = new DataView(buffer);
+
+        function writeStr(off, str) { for (let i=0;i<str.length;i++) view.setUint8(off+i, str.charCodeAt(i)); }
+        writeStr(0,  'RIFF');
+        view.setUint32(4,  36 + numSamples * 2, true);
+        writeStr(8,  'WAVE');
+        writeStr(12, 'fmt ');
+        view.setUint32(16, 16, true);        // chunk size
+        view.setUint16(20, 1,  true);        // PCM
+        view.setUint16(22, 1,  true);        // mono
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, sampleRate * 2, true); // byte rate
+        view.setUint16(32, 2,  true);        // block align
+        view.setUint16(34, 16, true);        // bits per sample
+        writeStr(36, 'data');
+        view.setUint32(40, numSamples * 2, true);
+
+        // Convert float32 → int16
+        for (let i = 0; i < numSamples; i++) {
+            let s = Math.max(-1, Math.min(1, samples[i]));
+            view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+
+        const blob = new Blob([buffer], { type: 'audio/wav' });
+        const url  = URL.createObjectURL(blob);
+        const a    = document.getElementById('wavLink');
+        a.href     = url;
+        a.download = 'ei-sample-' + Date.now() + '.wav';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
     }
 
     async function sendBLECmd(cmd, silent=false) {
