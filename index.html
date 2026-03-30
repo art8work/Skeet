@@ -238,7 +238,7 @@
     function runAiInference(dataArray) {
         if (!classifierInitialized || !eiClassifier || !isAiEnabled) return;
         try {
-            let result = eiClassifier.classify(dataArray, false);
+            let result = Module.run_classifier_continuous(dataArray, false);
 
             // Log raw result shape once for debugging
             if (!runAiInference._logged) {
@@ -391,7 +391,10 @@ audioDataBuffer.push(val);
     // Run inference
     if (audioDataBuffer.length >= 16000) {
         if (classifierInitialized) {
-            runAiInference(audioDataBuffer.slice(0, 16000));
+           let result = Module.run_classifier_continuous(
+    audioDataBuffer.slice(0, 16000),
+    false
+);
         }
         audioDataBuffer = audioDataBuffer.slice(4000);
     }
