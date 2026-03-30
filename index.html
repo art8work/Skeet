@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V19.16</title>
+    <title>AI Skeet Puller V19.17</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- Load the Edge Impulse AI Engine (must be in same folder) -->
     <script src="edge-impulse-standalone.js"></script>
@@ -18,7 +18,7 @@
         .delay-label { font-size: 15px; font-weight: bold;}
         .delay-btn { background: #555; color: white; border: none; padding: 6px 16px; font-size: 18px; border-radius: 5px; font-weight: bold; cursor: pointer;}
         .delay-val { font-size: 16px; font-weight: bold; width: 45px; display: inline-block; text-align: center; color: #00d2ff;}
-        /* Volume bar (always shown - works in both VOLUME and AI mode) */
+        /* Volume bar (always shown) */
         #vol-bar-container { width: 90%; height: 18px; background: #444; margin: 12px auto 4px; border-radius: 9px; overflow: hidden; }
         #vol-bar { width: 0%; height: 100%; background: #0f0; transition: width 0.1s, background 0.2s; }
         #ai-confidence { font-size: 14px; font-weight: bold; color: #0f0; margin: 4px 0; min-height: 18px; }
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V19.16 (Edge Impulse)</h2>
+    <h2>AI Puller V19.17 (Edge Impulse)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -76,12 +76,10 @@
         </div>
     </div>
 
-    <!-- Volume bar always visible for feedback -->
     <div id="vol-bar-container"><div id="vol-bar"></div></div>
     <div id="ai-confidence">AI: Waiting for engine...</div>
     <div id="ai-status-row">Engine not loaded</div>
 
-    <!-- Threshold slider: range 5-150 matches V18 volume scale; AI mode uses 0-100% mapped internally -->
     <label id="threshLabel" for="threshSlider">Trigger Sensitivity: <span id="threshVal">50</span></label><br>
     <input type="range" id="threshSlider" min="5" max="150" value="50" style="width: 80%; margin-top: 5px;">
 
@@ -89,9 +87,6 @@
     <div id="log">--- Debug Log ---<br></div>
 
 <script>
-    // =====================================================================
-    // STATE & CONSTANTS
-    // =====================================================================
     const SERVICE_UUID  = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
     const CHAR_RX_UUID  = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
     const CHAR_TX_UUID  = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
@@ -99,24 +94,16 @@
     let bleDevice, bleCharacteristic, bleTxCharacteristic;
     let isBleConnected = false;
 
-    // Mic state machine (same as V18 — prevents double-triggers)
-    // 0 = ready, 1 = triggered/locked, 2 = waiting for quiet
     let micState = 0;
     let isMicActive = false;
     let wasMicActiveBeforeSleep = false;
     let audioContext, audioStream, animId;
 
-    // AI engine state
     let classifierInitialized = false;
     let aiProcessor = null;
-    let audioDataBuffer = [];
-    let lastAiConfidence = 0;
-
-    // Threshold: single slider, used for BOTH volume mode and AI mode
-    // In volume mode: raw volume average vs threshold (5–150 scale)
-    // In AI mode:     confidence% vs (threshold / 1.5) maps 5–150 → ~3–100%: change from 1.5 to 100
+    let audioDataBuffer =[];
+    
     let threshold = 50;
-
     let isSyncEnabled = true;
     let isVoiceMode   = true;
     let armedMode     = null;
@@ -126,9 +113,6 @@
     let ddVal         = 0.0;
     let muteDelay     = 500;
 
-    // =====================================================================
-    // HELPERS
-    // =====================================================================
     function logMsg(msg) {
         const logDiv = document.getElementById('log');
         logDiv.innerHTML = msg + "<br>" + logDiv.innerHTML;
@@ -139,51 +123,40 @@
         document.getElementById('threshVal').innerText = threshold;
     };
 
-    // =====================================================================
-    // EDGE IMPULSE AI ENGINE
-    // Official EI browser pattern: EdgeImpulseClassifier wraps Module.run_classifier
-    // Data MUST be copied to WASM heap before calling run_classifier.
-    // See: https://docs.edgeimpulse.com/docs/run-inference/webassembly/through-webassembly-browser
-    // =====================================================================
     let isAiEnabled = true;
-    let eiClassifier = null;  // EdgeImpulseClassifier instance
+    let eiClassifier = null; 
 
-    // Mirrors the official EI run-impulse.js EdgeImpulseClassifier class
     class EdgeImpulseClassifier {
         _initialized = false;
-    init() {
-    return new Promise((resolve) => {
+        init() {
+            return new Promise((resolve) => {
+                if (window.Module && window.Module.calledRun === true) {
+                    window._eiModuleReady = true;
+                    this._initialized = true;
+                    resolve();
+                    return;
+                }
+                const prev = window.Module.onRuntimeInitialized;
+                window.Module.onRuntimeInitialized = () => {
+                    if (typeof prev === 'function') prev();
+                    window._eiModuleReady = true;
+                    this._initialized = true;
+                    resolve();
+                };
+            });
+        } 
 
-        // ✅ KEY FIX: WASM already finished loading
-        if (window.Module && window.Module.calledRun === true) {
-            console.log("⚡ WASM already initialized (calledRun=true)");
-            window._eiModuleReady = true;
-            this._initialized = true;
-            resolve();
-            return;
-        }
-
-        // ⏳ Otherwise wait for it
-        const prev = window.Module.onRuntimeInitialized;
-        window.Module.onRuntimeInitialized = () => {
-            if (typeof prev === 'function') prev();
-            console.log("⏳ WASM runtime initialized (callback)");
-            window._eiModuleReady = true;
-            this._initialized = true;
-            resolve();
-        };
-    });
-} 
-
-        // Copy Float32Array into WASM heap, run classifier, free heap
         classify(rawData, debug = false) {
             if (!this._initialized) throw new Error('Module not initialized');
             const obj = this._arrayToHeap(rawData);
+            
+            // Use run_classifier which computes the full window
             let ret = Module.run_classifier(obj.buffer.byteOffset, rawData.length, debug);
             Module._free(obj.ptr);
+            
             if (ret.result !== 0) throw new Error('Classification failed: ' + ret.result);
-            // Build plain JS result from the EI C++ object
-            let jsResult = { anomaly: ret.anomaly, results: [] };
+            
+            let jsResult = { anomaly: ret.anomaly, results:[] };
             for (let i = 0; i < ret.size(); i++) {
                 let c = ret.get(i);
                 jsResult.results.push({ label: c.label, value: c.value });
@@ -201,11 +174,8 @@
         }
     }
 
-    // Dump Module state to log — tap the orange Dump button
     function dumpModule() {
         if (!window.Module) { logMsg("❌ window.Module undefined — JS not loaded"); return; }
-        let fns = Object.keys(window.Module).filter(k => typeof window.Module[k] === 'function');
-        logMsg("📦 Module fns: " + (fns.join(', ') || '(none)'));
         logMsg("📦 _eiModuleReady=" + window._eiModuleReady + " classifierReady=" + classifierInitialized);
         if (eiClassifier && classifierInitialized) {
             try {
@@ -219,7 +189,6 @@
     async function initEiClassifier() {
         try {
             eiClassifier = new EdgeImpulseClassifier();
-             console.log("Module.calledRun =", window.Module?.calledRun);
             await eiClassifier.init();
             classifierInitialized = true;
             logMsg("✅ AI Engine Ready!");
@@ -231,36 +200,37 @@
             document.getElementById('ai-confidence').innerText = "Volume detection active";
         }
     }
-    // Kick off immediately — resolves when WASM fires onRuntimeInitialized
+    
     initEiClassifier();
 
-    // Called with 16000 float32 samples from the ScriptProcessor
+    // Safely handles inference using the WASM memory heap class
     function runAiInference(dataArray) {
         if (!classifierInitialized || !eiClassifier || !isAiEnabled) return;
         try {
-            let result = Module.run_classifier_continuous(dataArray, false);
+            // FIXED: Using the wrapper class instead of calling Module directly
+            let result = eiClassifier.classify(dataArray, false);
 
-            // Log raw result shape once for debugging
             if (!runAiInference._logged) {
                 runAiInference._logged = true;
                 logMsg("🔬 First result: " + JSON.stringify(result).substring(0, 250));
             }
 
-            // Find "pull" label in results array
             let pullScore = null;
             if (result && result.results) {
                 for (let r of result.results) {
                     if (r.label.toLowerCase() === "pull") { pullScore = r.value; break; }
                 }
             }
+            
+            // Debug output to see what the AI thinks it's hearing
             logMsg("Labels: " + result.results.map(r => r.label + ":" + Math.round(r.value*100)).join(", "));
-            if (pullScore !== null) {
-            logMsg("Pull score: " + pullScore.toFixed(2));
-            }
+            
             if (pullScore === null) return;
 
             let pct = Math.round(pullScore * 100);
             document.getElementById('ai-confidence').innerText = "AI Confidence: " + pct + "%";
+            
+            // Map the 5-150 slider to a 0.0 - 1.0 confidence ratio
             let aiThreshold = threshold / 100;
 
             if (micState === 0 && pullScore >= aiThreshold && isVoiceMode ) {
@@ -278,25 +248,14 @@
         }
     }
 
-    // =====================================================================
-    // MIC START / STOP  (mirrors V18 architecture exactly)
-    // =====================================================================
     async function startMic() {
-        // AI engine init is handled by initEiClassifier() above.
-        if (classifierInitialized) {
-            logMsg("🧠 AI mode active.");
-        } else {
-            logMsg("⏳ AI engine not ready yet — volume detection active until it loads.");
-        }
+        if (classifierInitialized) logMsg("🧠 AI mode active.");
+        else logMsg("⏳ AI engine not ready yet — volume detection active until it loads.");
 
         try {
             audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
             window.AudioContext = window.AudioContext || window.webkitAudioContext;
-
-            // AI requires 16kHz; volume analyser works at any rate.
-            // We create the context at 16kHz so both systems share one context.
             audioContext = new window.AudioContext({ sampleRate: 16000 });
-            logMsg("Actual sampleRate: " + audioContext.sampleRate);
             if (audioContext.state === 'suspended') await audioContext.resume();
             if (audioContext.state !== 'running') { logMsg("ERROR: Audio Engine failed."); return; }
 
@@ -306,102 +265,63 @@
             logMsg("Mic activated. Listening for 'Pull'...");
 
             const source   = audioContext.createMediaStreamSource(audioStream);
-
-            // --- Volume analyser (same as V18, always active for the bar) ---
             const analyser = audioContext.createAnalyser();
             analyser.fftSize = 256;
             source.connect(analyser);
             const freqData = new Uint8Array(analyser.frequencyBinCount);
 
-            // --- AI ScriptProcessor at 16kHz (4096 samples ≈ 250ms chunks) ---
-            // Always create it — runs as soon as classifierInitialized becomes true,
-            // even if the engine finishes loading after the mic is already on.
             aiProcessor = audioContext.createScriptProcessor(4096, 1, 1);
             source.connect(aiProcessor);
             aiProcessor.connect(audioContext.destination);
 
-   aiProcessor.onaudioprocess = function(e) {
-    if (!isMicActive || micState === 1) return;
+            aiProcessor.onaudioprocess = function(e) {
+                if (!isMicActive || micState === 1) return;
 
-    const inputData = e.inputBuffer.getChannelData(0);
+                const inputData = e.inputBuffer.getChannelData(0);
+                let downsampled = inputData;
+                
+                // Downsample if iOS ignored the 16kHz request
+                if (audioContext.sampleRate !== 16000) {
+                    const ratio = audioContext.sampleRate / 16000;
+                    const newLen = Math.round(inputData.length / ratio);
+                    downsampled = new Float32Array(newLen);
+                    for (let i = 0; i < newLen; i++) downsampled[i] = inputData[Math.floor(i * ratio)];
+                }
 
- // Copy input (important)
-let downsampled = new Float32Array(inputData);
+                // Remove DC offset
+                let mean = 0;
+                for (let i = 0; i < downsampled.length; i++) mean += downsampled[i];
+                mean /= downsampled.length;
 
-// Downsample if needed
-if (audioContext.sampleRate !== 16000) {
-    const ratio = audioContext.sampleRate / 16000;
-    const newLen = Math.round(inputData.length / ratio);
-    downsampled = new Float32Array(newLen);
+                let max = 0;
+                // FIXED: Only ONE loop pushing to audioDataBuffer
+                for (let i = 0; i < downsampled.length; i++) {
+                    let val = downsampled[i] - mean;
+                    val *= 3.0; // 3x Gain boost
+                    if (val > 1) val = 1;
+                    if (val < -1) val = -1;
 
-    for (let i = 0; i < newLen; i++) {
-        downsampled[i] = inputData[Math.floor(i * ratio)];
-    }
-}
+                    const abs = Math.abs(val);
+                    if (abs > max) max = abs;
 
-// ✅ Remove DC offset
-let mean = 0;
-for (let i = 0; i < downsampled.length; i++) {
-    mean += downsampled[i];
-}
-mean /= downsampled.length;
+                    audioDataBuffer.push(val);
+                }
 
-for (let i = 0; i < downsampled.length; i++) {
-    downsampled[i] -= mean;
-}
+                // Throttled UI Log
+                if (!window._lastLog || Date.now() - window._lastLog > 1000) {
+                    logMsg("Audio level: " + max.toFixed(3));
+                    window._lastLog = Date.now();
+                }
 
-// ✅ Normalize + push
-let max = 0;
+                // Run inference
+                if (audioDataBuffer.length >= 16000) {
+                    if (classifierInitialized) {
+                        runAiInference(audioDataBuffer.slice(0, 16000));
+                    }
+                    audioDataBuffer = audioDataBuffer.slice(4000); // Slide window 250ms
+                }
+            };
 
-for (let i = 0; i < downsampled.length; i++) {
-    let val = downsampled[i];
-
-    // gain boost
-    val *= 3.0;
-
-    // clamp
-    if (val > 1) val = 1;
-    if (val < -1) val = -1;
-
-    // track level AFTER normalization
-    const abs = Math.abs(val);
-    if (abs > max) max = abs;
-
-    audioDataBuffer.push(val);
-}
-
-// Throttled log
-if (!window._lastLog || Date.now() - window._lastLog > 500) {
-    logMsg("Audio level: " + max.toFixed(3));
-    window._lastLog = Date.now();
-}
-    // Push into buffer
-    for (let i = 0; i < downsampled.length; i++) {
-        // Normalize audio
-let val = downsampled[i];
-
-// simple gain boost + clamp
-val = val * 3.0;  
-if (val > 1) val = 1;
-if (val < -1) val = -1;
-
-audioDataBuffer.push(val);
-    }
-
-    // Run inference
-    if (audioDataBuffer.length >= 16000) {
-        if (classifierInitialized) {
-           let result = Module.run_classifier_continuous(
-    audioDataBuffer.slice(0, 16000),
-    false
-);
-        }
-        audioDataBuffer = audioDataBuffer.slice(4000);
-    }
-};
-
-
-            // --- Volume animation loop (V18 style) ---
             function checkVolume() {
                 if (!isMicActive) return;
                 analyser.getByteFrequencyData(freqData);
@@ -411,7 +331,6 @@ audioDataBuffer.push(val);
 
                 document.getElementById('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
 
-                // Volume-based trigger: fires when AI is OFF or engine not loaded
                 if (!classifierInitialized || !isAiEnabled) {
                     if (micState === 0 && avgVol > threshold && isVoiceMode) {
                         processVoiceTrigger(avgVol, false);
@@ -421,7 +340,6 @@ audioDataBuffer.push(val);
                         logMsg("Quiet. Ready for next call.");
                     }
                 }
-
                 animId = requestAnimationFrame(checkVolume);
             }
             checkVolume();
@@ -435,7 +353,7 @@ audioDataBuffer.push(val);
         if (audioStream) audioStream.getTracks().forEach(t => t.stop());
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
         if (animId) cancelAnimationFrame(animId);
-        audioDataBuffer = [];
+        audioDataBuffer =[];
 
         isMicActive = false; micState = 0;
         if (resetUI) {
@@ -454,9 +372,6 @@ audioDataBuffer.push(val);
         else { wasMicActiveBeforeSleep = false; startMic(); }
     });
 
-    // =====================================================================
-    // IOS MIC HEALTH WATCH (from V18)
-    // =====================================================================
     document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
             if (isMicActive) {
@@ -486,9 +401,6 @@ audioDataBuffer.push(val);
         }
     }, 1500);
 
-    // =====================================================================
-    // VOICE TRIGGER  (unified for both volume and AI modes)
-    // =====================================================================
     async function processVoiceTrigger(level, isAi) {
         if (!armedMode || micState !== 0) return;
         micState = 1;
@@ -524,16 +436,13 @@ audioDataBuffer.push(val);
 
         setTimeout(() => {
             micState = 2;
-            audioDataBuffer = [];
+            audioDataBuffer =[];
             document.getElementById('vol-bar').style.background = "#f39c12";
             document.getElementById('md-display').style.color = "#aaa";
             logMsg("Lockout over. Waiting for quiet...");
         }, totalLockout);
     }
 
-    // =====================================================================
-    // UI — ARM / MODE
-    // =====================================================================
     document.getElementById('syncBtn').addEventListener('click', () => {
         isSyncEnabled = !isSyncEnabled;
         const btn = document.getElementById('syncBtn');
@@ -543,9 +452,7 @@ audioDataBuffer.push(val);
     });
 
     document.getElementById('vmBtn').addEventListener('click', () => { setVoiceMode(!isVoiceMode, false); });
-
     document.getElementById('dumpBtn').addEventListener('click', dumpModule);
-
     document.getElementById('aiBtn').addEventListener('click', () => {
         isAiEnabled = !isAiEnabled;
         const btn = document.getElementById('aiBtn');
@@ -599,7 +506,7 @@ audioDataBuffer.push(val);
     }
 
     window.cancelMode = function(fromSync = false) {
-        armedMode = null; hlStep = 0; micState = 0;               // ← FIXED: reset micState like V18
+        armedMode = null; hlStep = 0; micState = 0; 
         document.getElementById('vol-bar').style.background = "#0f0";
         document.getElementById('md-display').style.color = "#aaa";
         updateArmUI();
@@ -644,9 +551,6 @@ audioDataBuffer.push(val);
         }
     };
 
-    // =====================================================================
-    // BLE
-    // =====================================================================
     document.getElementById('connectBtn').addEventListener('click', async () => {
         if (isBleConnected) { if (bleDevice && bleDevice.gatt.connected) bleDevice.gatt.disconnect(); return; }
         try {
