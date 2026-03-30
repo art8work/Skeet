@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V19.15</title>
+    <title>AI Skeet Puller V19.16</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- Load the Edge Impulse AI Engine (must be in same folder) -->
     <script src="edge-impulse-standalone.js"></script>
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V19.15 (Edge Impulse)</h2>
+    <h2>AI Puller V19.16 (Edge Impulse)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -325,32 +325,67 @@
 
     const inputData = e.inputBuffer.getChannelData(0);
 
-    // Downsample if needed
-    let downsampled = inputData;
-    if (audioContext.sampleRate !== 16000) {
-        const ratio = audioContext.sampleRate / 16000;
-        const newLen = Math.round(inputData.length / ratio);
-        downsampled = new Float32Array(newLen);
+ // Copy input (important)
+let downsampled = new Float32Array(inputData);
 
-        for (let i = 0; i < newLen; i++) {
-            downsampled[i] = inputData[Math.floor(i * ratio)];
-        }
-    }
+// Downsample if needed
+if (audioContext.sampleRate !== 16000) {
+    const ratio = audioContext.sampleRate / 16000;
+    const newLen = Math.round(inputData.length / ratio);
+    downsampled = new Float32Array(newLen);
 
-    // Audio level debug
-    let max = 0;
-    for (let i = 0; i < downsampled.length; i++) {
-        const val = Math.abs(downsampled[i]);
-        if (val > max) max = val;
+    for (let i = 0; i < newLen; i++) {
+        downsampled[i] = inputData[Math.floor(i * ratio)];
     }
-    if (!window._lastLog || Date.now() - window._lastLog > 500) {
+}
+
+// ✅ Remove DC offset
+let mean = 0;
+for (let i = 0; i < downsampled.length; i++) {
+    mean += downsampled[i];
+}
+mean /= downsampled.length;
+
+for (let i = 0; i < downsampled.length; i++) {
+    downsampled[i] -= mean;
+}
+
+// ✅ Normalize + push
+let max = 0;
+
+for (let i = 0; i < downsampled.length; i++) {
+    let val = downsampled[i];
+
+    // gain boost
+    val *= 3.0;
+
+    // clamp
+    if (val > 1) val = 1;
+    if (val < -1) val = -1;
+
+    // track level AFTER normalization
+    const abs = Math.abs(val);
+    if (abs > max) max = abs;
+
+    audioDataBuffer.push(val);
+}
+
+// Throttled log
+if (!window._lastLog || Date.now() - window._lastLog > 500) {
     logMsg("Audio level: " + max.toFixed(3));
     window._lastLog = Date.now();
 }
-
     // Push into buffer
     for (let i = 0; i < downsampled.length; i++) {
-        audioDataBuffer.push(downsampled[i]);
+        // Normalize audio
+let val = downsampled[i];
+
+// simple gain boost + clamp
+val = val * 3.0;  
+if (val > 1) val = 1;
+if (val < -1) val = -1;
+
+audioDataBuffer.push(val);
     }
 
     // Run inference
