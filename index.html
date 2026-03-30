@@ -1,10 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V20</title>
+    <title>AI Skeet Puller V21</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <!-- CACHE BUSTER: Forces the browser to load the new JS file -->
-    <script src="edge-impulse-standalone.js?v=20"></script>
+    <script src="edge-impulse-standalone.js?v=21"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 15px; background: #222; color: white;}
         .top-row { display: flex; justify-content: center; gap: 8px; margin: 8px 3%; }
@@ -31,7 +31,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V20 (Continuous Stream)</h2>
+    <h2>AI Puller V21 (PCM Audio Fix)</h2>
     
     <div class="top-row">
         <button id="connectBtn" class="top-btn" style="background: #007BFF; color: white;">Connect BLE</button>
@@ -89,7 +89,6 @@
         <button id="recBtn" class="top-btn" style="background:#c0392b;color:white;width:48%;font-size:14px;padding:8px;">
             ⏺ Record &amp; Share WAV
         </button>
-        <a id="wavLink" style="display:none"></a>
     </div>
 
     <div id="md-display">Mute Delay (MD): 500ms</div>
@@ -183,15 +182,8 @@
     }
 
     function dumpModule() {
-        if (!window.Module) { logMsg("❌ window.Module undefined — JS not loaded"); return; }
-        logMsg("📦 _eiModuleReady=" + window._eiModuleReady + " classifierReady=" + classifierInitialized);
-        if (eiClassifier && classifierInitialized) {
-            try {
-                let dummy = new Float32Array(16000);
-                let r = eiClassifier.classify(dummy, false);
-                logMsg("🔬 Test result: " + JSON.stringify(r).substring(0, 200));
-            } catch(e) { logMsg("🔬 Test error: " + e); }
-        }
+        if (!window.Module) { logMsg("❌ window.Module undefined"); return; }
+        logMsg("📦 _eiModuleReady=" + window._eiModuleReady + " ready=" + classifierInitialized);
     }
 
     async function initEiClassifier() {
@@ -250,7 +242,6 @@
                 micState = 0;
                 document.getElementById('vol-bar').style.background = "#0f0";
             }
-
         } catch (err) {
             if (!runAiInference._errCount) runAiInference._errCount = 0;
             if (++runAiInference._errCount <= 3) logMsg("⚠️ Inference error: " + err);
@@ -258,7 +249,7 @@
     }
 
     // =========================================================
-    // MIC & CONTINUOUS AUDIO STREAM
+    // MIC & CONTINUOUS AUDIO STREAM (FIXED FOR PCM)
     // =========================================================
     async function startMic() {
         try {
@@ -281,48 +272,52 @@
             source.connect(aiProcessor);
             aiProcessor.connect(audioContext.destination);
 
-            // The critical fix: Continuous streaming, no energy gates
             aiProcessor.onaudioprocess = function(e) {
                 if (!isMicActive) return;
 
                 const rawChunk = e.inputBuffer.getChannelData(0);
                 let chunk16k = rawChunk;
                 
-                // Downsample if necessary
                 if (audioContext.sampleRate !== 16000) {
                     const ratio  = audioContext.sampleRate / 16000;
                     const newLen = Math.round(rawChunk.length / ratio);
                     chunk16k     = new Float32Array(newLen);
-                    for (let i = 0; i < newLen; i++) chunk16k[i] = rawChunk[Math.floor(i * ratio)];
+                    for (let i = 0; i < newLen; i++) {
+                        chunk16k[i] = rawChunk[Math.floor(i * ratio)];
+                    }
                 }
 
-                // Remove DC offset & clamp
                 let mean = 0;
                 for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i];
                 mean /= chunk16k.length;
 
                 for (let i = 0; i < chunk16k.length; i++) {
-                    let v = chunk16k[i] - mean;
-                    if (v > 1) v = 1;
-                    if (v < -1) v = -1;
-                    chunk16k[i] = v;
+                    let rawVal = chunk16k[i] - mean;
                     
-                    // WAV Capture
-                    if (wavCaptureBuffer !== null) wavCaptureBuffer.push(v);
-                    
-                    // Accumulate for AI (only if not locked out from a recent shot)
-                    if (micState !== 1) audioDataBuffer.push(v);
+                    // WAV Capture (-1.0 to 1.0)
+                    if (wavCaptureBuffer !== null) {
+                        let wVal = rawVal * 2.0; 
+                        if (wVal > 1) wVal = 1;
+                        if (wVal < -1) wVal = -1;
+                        wavCaptureBuffer.push(wVal);
+                    }
+
+                    // AI Data MUST BE 16-BIT PCM FORMAT (-32768 to 32767)
+                    if (micState !== 1) {
+                        let aiVal = rawVal * 32768.0 * 2.0; // Scale to 16-bit + Gain Boost
+                        if (aiVal > 32767) aiVal = 32767;
+                        if (aiVal < -32768) aiVal = -32768;
+                        audioDataBuffer.push(aiVal);
+                    }
                 }
 
-                // Run inference when we have 1 second of audio
                 const FRAME_SIZE = 16000;
                 if (micState !== 1 && audioDataBuffer.length >= FRAME_SIZE) {
-                    // Extract exactly 1 second
-                    const slice = new Float32Array(audioDataBuffer.slice(-FRAME_SIZE));
+                    const slice = new Float32Array(audioDataBuffer.slice(0, FRAME_SIZE));
                     if (classifierInitialized) runAiInference(slice);
                     
-                    // Slide the window by 250ms (keeps memory size manageable)
-                    audioDataBuffer = audioDataBuffer.slice(4000);
+                    // Slide window 250ms
+                    audioDataBuffer = audioDataBuffer.slice(4000); 
                 }
             };
 
@@ -334,7 +329,6 @@
                 let avgVol = sum / freqData.length;
                 document.getElementById('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
 
-                // Fallback to volume trigger if AI is off
                 if (!classifierInitialized || !isAiEnabled) {
                     if (micState === 0 && avgVol > threshold && isVoiceMode) {
                         processVoiceTrigger(avgVol, false);
@@ -352,11 +346,12 @@
     }
 
     function stopMic(resetUI = true) {
-        if (aiProcessor)  { aiProcessor.disconnect(); aiProcessor = null; }
-        if (audioStream)  audioStream.getTracks().forEach(t => t.stop());
+        if (aiProcessor) { aiProcessor.disconnect(); aiProcessor = null; }
+        if (audioStream) audioStream.getTracks().forEach(t => t.stop());
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
-        if (animId)       cancelAnimationFrame(animId);
+        if (animId) cancelAnimationFrame(animId);
         audioDataBuffer =[];
+
         isMicActive = false; micState = 0;
         if (resetUI) {
             document.getElementById('listenBtn').innerText = "Turn On Mic";
@@ -373,16 +368,15 @@
     });
 
     // =========================================================
-    // WAV RECORDER (Diagnostic Tool)
+    // WAV RECORDER
     // =========================================================
     document.getElementById('recBtn').addEventListener('click', () => {
         if (!isMicActive) { logMsg("⚠️ Turn on mic first"); return; }
         const btn = document.getElementById('recBtn');
-        const CAPTURE_SAMPLES = 16000 * 3; // 3 seconds
+        const CAPTURE_SAMPLES = 16000 * 3; 
         wavCaptureBuffer =[];
         btn.innerText = "🔴 Recording 3s...";
         btn.disabled  = true;
-        logMsg("⏺ Recording started — say 'pull' now...");
 
         setTimeout(async () => {
             const captured = wavCaptureBuffer ? wavCaptureBuffer.slice(0, CAPTURE_SAMPLES) :[];
@@ -398,19 +392,12 @@
         const buffer     = new ArrayBuffer(44 + numSamples * 2);
         const view       = new DataView(buffer);
         function writeStr(off, str) { for (let i=0;i<str.length;i++) view.setUint8(off+i, str.charCodeAt(i)); }
-        writeStr(0,  'RIFF');
-        view.setUint32(4,  36 + numSamples * 2, true);
-        writeStr(8,  'WAVE');
-        writeStr(12, 'fmt ');
-        view.setUint32(16, 16, true);
-        view.setUint16(20, 1,  true);   
-        view.setUint16(22, 1,  true);   
-        view.setUint32(24, sampleRate, true);
-        view.setUint32(28, sampleRate * 2, true);
-        view.setUint16(32, 2,  true);
-        view.setUint16(34, 16, true);
-        writeStr(36, 'data');
-        view.setUint32(40, numSamples * 2, true);
+        writeStr(0,  'RIFF'); view.setUint32(4,  36 + numSamples * 2, true);
+        writeStr(8,  'WAVE'); writeStr(12, 'fmt '); view.setUint32(16, 16, true);
+        view.setUint16(20, 1,  true); view.setUint16(22, 1,  true);   
+        view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * 2, true);
+        view.setUint16(32, 2,  true); view.setUint16(34, 16, true);
+        writeStr(36, 'data'); view.setUint32(40, numSamples * 2, true);
         for (let i = 0; i < numSamples; i++) {
             let s = Math.max(-1, Math.min(1, samples[i]));
             view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
@@ -419,13 +406,10 @@
     }
 
     async function downloadWav(samples, sampleRate) {
-        const blob     = buildWavBlob(samples, sampleRate);
+        const blob = buildWavBlob(samples, sampleRate);
         const fileName = 'ei-sample-' + Date.now() + '.wav';
         if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], fileName, { type: 'audio/wav' })] })) {
-            try {
-                await navigator.share({ files:[new File([blob], fileName, { type: 'audio/wav' })] });
-                return;
-            } catch(e) {}
+            try { await navigator.share({ files:[new File([blob], fileName, { type: 'audio/wav' })] }); return; } catch(e) {}
         }
         const url = URL.createObjectURL(blob);
         window.open(url, '_blank');
@@ -433,7 +417,7 @@
     }
 
     // =========================================================
-    // UI, BLE, & TRIGGERS (Standard logic)
+    // UI, BLE, & TRIGGERS 
     // =========================================================
     document.getElementById('syncBtn').addEventListener('click', () => {
         isSyncEnabled = !isSyncEnabled;
@@ -452,6 +436,7 @@
         } else {
             btn.innerText = "AI: OFF (Vol)"; btn.style.background = "#6c757d";
             document.getElementById('ai-confidence').innerText = "AI off — volume mode";
+            document.getElementById('label-scores').innerText = "—";
         }
     });
 
@@ -463,6 +448,12 @@
         updateArmUI();
         if (!fromSync && isBleConnected && isSyncEnabled) sendBLECmd(isVoiceMode ? "MODE:VOICE" : "MODE:MANUAL", true);
     }
+
+    window.adjDelay = function(type, amt) {
+        if (!isBleConnected) return;
+        if (type === 'D')  { dVal  = Math.max(0, dVal  + amt); document.getElementById('val-D').innerText  = dVal.toFixed(1)  + "s"; sendBLECmd("D"  + dVal.toFixed(1)); }
+        else               { ddVal = Math.max(0, ddVal + amt); document.getElementById('val-DD').innerText = ddVal.toFixed(1) + "s"; sendBLECmd("DD" + ddVal.toFixed(1)); }
+    };
 
     function updateArmUI() {
         document.querySelectorAll('.arm-btn').forEach(b => b.classList.remove('active'));
@@ -523,6 +514,95 @@
             sendBLECmd(armedMode?"MODE:"+armedMode+":"+lastHouse:"MODE:CANCEL", true);
     };
 
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+        if (isBleConnected) { if (bleDevice?.gatt.connected) bleDevice.gatt.disconnect(); return; }
+        try {
+            logMsg("Searching...");
+            bleDevice = await navigator.bluetooth.requestDevice({ filters:[{name:'BLUE Puller'}], optionalServices:[SERVICE_UUID] });
+            bleDevice.addEventListener('gattserverdisconnected', handleBleDisconnect);
+            const server  = await bleDevice.gatt.connect();
+            const service = await server.getPrimaryService(SERVICE_UUID);
+            bleCharacteristic   = await service.getCharacteristic(CHAR_RX_UUID);
+            bleTxCharacteristic = await service.getCharacteristic(CHAR_TX_UUID);
+            await bleTxCharacteristic.startNotifications();
+            bleTxCharacteristic.addEventListener('characteristicvaluechanged', handleBleNotifications);
+            isBleConnected = true;
+            document.getElementById('connectBtn').innerText = "Disconnect BLE";
+            document.getElementById('connectBtn').style.background = "#dc3545";
+            logMsg("BLE Connected!"); setTimeout(()=>sendBLECmd("?"),500);
+        } catch(e) { logMsg("BLE Error: "+e); }
+    });
+
+    function handleBleDisconnect() {
+        isBleConnected=false; bleCharacteristic=null; bleTxCharacteristic=null;
+        document.getElementById('connectBtn').innerText="Connect BLE";
+        document.getElementById('connectBtn').style.background="#007BFF";
+        logMsg("BLE Disconnected.");
+    }
+
+    function handleBleNotifications(event) {
+        let msg = new TextDecoder('utf-8').decode(event.target.value).trim();
+        if (!msg || msg.startsWith("Err: Unknown")) return;
+
+        if (msg==="GLOVE: CONNECTED") {
+            logMsg("🤝 Glove joined."); sendBLECmd("ACK:GLOVE",true);
+            if (isSyncEnabled) setTimeout(()=>sendBLECmd(isVoiceMode?"MODE:VOICE":"MODE:MANUAL",true),600);
+            return;
+        }
+        if (msg==="AH")     { sendBLECmd("ACK:AH",true);     setTimeout(()=>setMode('H',true),400); return; }
+        if (msg==="AL")     { sendBLECmd("ACK:AL",true);     setTimeout(()=>setMode('L',true),400); return; }
+        if (msg==="AD")     { sendBLECmd("ACK:AD",true);     setTimeout(()=>setMode('D',true),400); return; }
+        if (msg==="CANCEL") { sendBLECmd("ACK:CANCEL",true); setTimeout(()=>cancelMode(true),400); return; }
+
+        if (msg.startsWith("MODE:")) {
+            if (!isSyncEnabled) return;
+            if (msg==="MODE:VOICE")  { setVoiceMode(true,true);  return; }
+            if (msg==="MODE:MANUAL") { setVoiceMode(false,true); return; }
+            let parts=msg.split(":"), st=parts[1];
+            if (st==="MAN_UPDATE") { lastHouse=parts[2]; if(parts[3]) hlStep=parseInt(parts[3]); updateArmUI(); return; }
+            if (parts[2]) lastHouse=parts[2];
+            if (st==="CANCEL") cancelMode(true); else setMode(st,true);
+            return;
+        }
+
+        if (msg.includes("Delay Set:"))   { let m=msg.match(/Delay Set: ([\d.]+)/);   if(m){dVal=parseFloat(m[1]);   document.getElementById('val-D').innerText=dVal.toFixed(1)+"s";} }
+        if (msg.includes("Dbl Dly Set:")) { let m=msg.match(/Dbl Dly Set: ([\d.]+)/); if(m){ddVal=parseFloat(m[1]);  document.getElementById('val-DD').innerText=ddVal.toFixed(1)+"s";} }
+        if (msg.includes("MD Set:"))      { let m=msg.match(/MD Set: (\d+)/);          if(m){muteDelay=parseInt(m[1]);document.getElementById('md-display').innerText="Mute Delay (MD): "+muteDelay+"ms";} }
+        
+        if (msg.includes("STATUS:")) {
+            let d=msg.match(/Delay: ([\d.]+)/),dd=msg.match(/Dbl: ([\d.]+)/),md=msg.match(/MD: (\d+)/);
+            if(d)  { dVal=parseFloat(d[1]);    document.getElementById('val-D').innerText=dVal.toFixed(1)+"s"; }
+            if(dd) { ddVal=parseFloat(dd[1]);  document.getElementById('val-DD').innerText=ddVal.toFixed(1)+"s"; }
+            if(md) { muteDelay=parseInt(md[1]);document.getElementById('md-display').innerText="Mute Delay (MD): "+muteDelay+"ms"; }
+        }
+
+        logMsg("📡 [TRAP]: "+msg);
+        if      (msg==="CMD: High")                        { lastHouse='H';  updateArmUI(); }
+        else if (msg==="CMD: Low")                         { lastHouse='L';  updateArmUI(); }
+        else if (msg==="CMD: D1H"||msg==="CMD: Doubles")   { lastHouse='D';  updateArmUI(); }
+        else if (msg==="CMD: D1L")                         { lastHouse='DR'; updateArmUI(); }
+    }
+
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            if (isMicActive) {
+                wasMicActiveBeforeSleep = true; stopMic(false);
+                document.getElementById('listenBtn').innerText = "Mic Paused 💤";
+                document.getElementById('listenBtn').style.background = "#f39c12";
+            }
+        } else {
+            if (wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; logMsg("Woke. Resuming mic..."); startMic(); }
+        }
+    });
+
+    setInterval(() => {
+        if (isMicActive && !document.hidden) {
+            let trackOk   = audioStream && audioStream.getTracks()[0]?.readyState === 'live';
+            let contextOk = audioContext && audioContext.state === 'running';
+            if (!trackOk || !contextOk) { logMsg("⚠️ iOS killed mic. Resetting."); stopMic(true); }
+        }
+    }, 1500);
+
     async function processVoiceTrigger(level, isAi) {
         if (!armedMode || micState !== 0) return;
         micState = 1;
@@ -542,8 +622,8 @@
             else              { cmdToSend = 'H'; hlStep = 0; cancelMode(false); }
         }
         else if (armedMode === 'T') {
-            if      (lastHouse === 'HL') { cmdToSend = (hlStep === 0) ? 'H' : 'L'; hlStep = (hlStep === 0) ? 1 : 0; }
-            else if (lastHouse === 'LH') { cmdToSend = (hlStep === 0) ? 'L' : 'H'; hlStep = (hlStep === 0) ? 1 : 0; }
+            if      (lastHouse === 'HL') { cmdToSend = (hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+            else if (lastHouse === 'LH') { cmdToSend = (hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
             else if (lastHouse === 'D')  cmdToSend = 'D1H';
             else if (lastHouse === 'DR') cmdToSend = 'D1L';
             else cmdToSend = lastHouse;
@@ -557,48 +637,4 @@
 
         setTimeout(() => {
             micState = 2;
-            audioDataBuffer =[];
-            document.getElementById('vol-bar').style.background = "#f39c12";
-            document.getElementById('md-display').style.color = "#aaa";
-            logMsg("Lockout over. Waiting for quiet...");
-        }, totalLockout);
-    }
-
-    // BLE Connect / Setup (Abbreviated for space)
-    document.getElementById('connectBtn').addEventListener('click', async () => {
-        if (isBleConnected) { if (bleDevice?.gatt.connected) bleDevice.gatt.disconnect(); return; }
-        try {
-            logMsg("Searching...");
-            bleDevice = await navigator.bluetooth.requestDevice({ filters:[{name:'BLUE Puller'}], optionalServices:[SERVICE_UUID] });
-            const server = await bleDevice.gatt.connect();
-            const service = await server.getPrimaryService(SERVICE_UUID);
-            bleCharacteristic = await service.getCharacteristic(CHAR_RX_UUID);
-            bleTxCharacteristic = await service.getCharacteristic(CHAR_TX_UUID);
-            await bleTxCharacteristic.startNotifications();
-            bleTxCharacteristic.addEventListener('characteristicvaluechanged', handleBleNotifications);
-            isBleConnected = true;
-            document.getElementById('connectBtn').innerText = "Disconnect BLE";
-            document.getElementById('connectBtn').style.background = "#dc3545";
-            logMsg("BLE Connected!"); setTimeout(()=>sendBLECmd("?"),500);
-        } catch(e) { logMsg("BLE Error: "+e); }
-    });
-
-    function handleBleNotifications(event) {
-        // Full BLE event handler logic matches V18 exactly
-        let msg = new TextDecoder('utf-8').decode(event.target.value).trim();
-        if (!msg) return;
-        if (msg.includes("STATUS:")) {
-            let dM = msg.match(/Delay: ([\d\.]+)/); if (dM) dVal = parseFloat(dM[1]);
-            let ddM = msg.match(/Dbl: ([\d\.]+)/); if (ddM) ddVal = parseFloat(ddM[1]);
-            let mdM = msg.match(/MD: (\d+)/); if (mdM) muteDelay = parseInt(mdM[1]);
-        }
-    }
-
-    async function sendBLECmd(cmd, silent = false) {
-        if (bleCharacteristic && isBleConnected) {
-            try { await bleCharacteristic.writeValue(new TextEncoder().encode(cmd)); } catch(e) {}
-        }
-    }
-</script>
-</body>
-</html>
+            audioDataBuffer =
