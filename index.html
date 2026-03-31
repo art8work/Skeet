@@ -1,14 +1,15 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V24</title>
+    <title>AI Skeet Puller V25.1</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <script src="edge-impulse-standalone.js?v=25"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
         .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
         button { padding: 12px; font-size: 16px; border-radius: 8px; font-weight: bold; border:none; cursor: pointer;}
-        .top-btn { flex: 1; } .arm-btn { flex: 1 1 22%; background: #444; color: white;}
+        .top-btn { flex: 1; } 
+        .arm-btn { flex: 1 1 22%; background: #444; color: white;}
         .arm-btn.active { background: #e74c3c; color: white; }
         #arm-status { font-size: 18px; font-weight: bold; color: #aaa; margin: 8px 0; }
         .delay-row { display: flex; justify-content: space-between; align-items: center; margin: 6px 5%; background: #333; padding: 6px 12px; border-radius: 8px; }
@@ -22,7 +23,7 @@
 </head>
 <body>
 
-    <h2>AI Puller V25 (WASM Memory Fix)</h2>
+    <h2>AI Puller V25.1</h2>
     
     <div class="row">
         <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
@@ -31,6 +32,10 @@
     <div class="row">
         <button id="vmBtn" class="top-btn" style="background:#9b59b6;color:white;">Mode: VOICE</button>
         <button id="syncBtn" class="top-btn" style="background:#17a2b8;color:white;">Sync: ON</button>
+    </div>
+    <div class="row">
+        <button id="aiBtn" class="top-btn" style="background:#27ae60;color:white;">AI: ON</button>
+        <button id="dumpBtn" class="top-btn" style="background:#e67e22;color:white;">🔍 Dump</button>
     </div>
     
     <div id="arm-status">SAFE / DISARMED</div>
@@ -57,64 +62,46 @@
     <div id="ai-confidence">AI: Waiting for engine...</div>
     <div id="label-scores">—</div>
 
-    <label>AI Confidence Trigger %: <b id="threshVal" style="color:#ffeb3b;">40</b></label><br>
+    <label>Trigger Sensitivity / AI %: <b id="threshVal" style="color:#ffeb3b;">40</b></label><br>
     <input type="range" id="threshSlider" min="5" max="95" value="40" style="width:80%; margin-top:5px;">
 
     <div id="md-display" style="color:#aaa; font-weight:bold; margin-top:8px;">Mute Delay: 500ms</div>
     <div id="log">--- Debug Log ---<br></div>
 
 <script>
-    // --- STATE VARIABLES ---
     const $ = id => document.getElementById(id);
     const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
     const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
     const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
     
-    let bleDev, rxChar, txChar;
-    let isBleConnected = false;
-
-    let micState = 0; // 0=ready, 1=fired/locked, 2=wait for quiet
-    let isMicActive = false, wasMicActiveBeforeSleep = false;
-    let audioContext, audioStream, animId, aiProcessor;
-    let audioDataBuffer =[];
+    let bleDev, rxChar, txChar, isBleConnected = false;
+    let micState = 0, isMicActive = false, wasMicActiveBeforeSleep = false;
+    let audioContext, audioStream, animId, aiProcessor, audioDataBuffer =[];
     
-    // AI & Settings
-    let isAiEnabled = true; 
-    let classifierReady = false;
-    let threshold = 40;
+    let isAiEnabled = true, classifierReady = false, threshold = 40;
     let isSyncEnabled = true, isVoiceMode = true;
     let armedMode = null, hlStep = 0, lastHouse = 'H';
     let dVal = 0.0, ddVal = 0.0, muteDelay = 500;
 
-    function logMsg(msg) {
-        $('log').innerHTML = msg + "<br>" + $('log').innerHTML;
-    }
+    function logMsg(msg) { $('log').innerHTML = msg + "<br>" + $('log').innerHTML; }
 
     $('threshSlider').oninput = function() {
-        threshold = parseInt(this.value);
-        $('threshVal').innerText = threshold;
+        threshold = parseInt(this.value); $('threshVal').innerText = threshold;
     };
 
-    // =========================================================
-    // EDGE IMPULSE ENGINE
-    // =========================================================
-    let eiClassifier = null; 
-
+    // --- EDGE IMPULSE ---
     class EdgeImpulseClassifier {
         _initialized = false;
         init() {
             return new Promise((resolve) => {
                 if (window.Module && typeof window.Module.run_classifier === 'function') {
-                    this._initialized = true;
-                    resolve();
-                    return;
+                    this._initialized = true; resolve(); return;
                 }
                 const prev = window.Module ? window.Module.onRuntimeInitialized : null;
                 window.Module = window.Module || {};
                 window.Module.onRuntimeInitialized = () => {
                     if (typeof prev === 'function') prev();
-                    this._initialized = true;
-                    resolve();
+                    this._initialized = true; resolve();
                 };
             });
         }
@@ -127,26 +114,15 @@
             if (ret.result !== 0) return null;
             let out =[];
             for (let i = 0; i < ret.size(); i++) {
-                let c = ret.get(i);
-                out.push({ label: c.label, value: c.value });
+                let c = ret.get(i); out.push({ label: c.label, value: c.value });
             }
             return out;
         }
     }
-
-    $('dumpBtn').addEventListener('click', () => {
-        if (!window.Module) { logMsg("❌ window.Module undefined"); return; }
-        logMsg("📦 Ready=" + classifierReady);
-        if (eiClassifier && classifierReady) {
-            try {
-                let r = eiClassifier.classify(new Float32Array(16000));
-                logMsg("🔬 Test result: " + JSON.stringify(r).substring(0, 200));
-            } catch(e) { logMsg("🔬 Test error: " + e); }
-        }
-    });
+    let eiClassifier = null;
 
     function initAI() {
-        logMsg("Initializing AI Engine...");
+        logMsg("Loading AI Engine...");
         let attempts = 0;
         let checkReady = setInterval(async () => {
             attempts++;
@@ -155,30 +131,38 @@
                 eiClassifier = new EdgeImpulseClassifier();
                 await eiClassifier.init();
                 classifierReady = true;
-                logMsg("✅ AI Engine Ready!");
+                logMsg("✅ AI Ready!");
                 $('ai-confidence').innerText = "AI Confidence: Listening...";
             } else if (attempts > 50) { 
                 clearInterval(checkReady);
-                logMsg("❌ AI Engine Failed to Load.");
+                logMsg("❌ AI Failed to Load. Using Volume Mode.");
                 $('ai-confidence').innerText = "AI Failed - Volume Mode Active";
             }
         }, 100);
     }
     initAI();
 
+    $('dumpBtn').addEventListener('click', () => {
+        if (!window.Module) { logMsg("❌ Module undefined"); return; }
+        logMsg("📦 Ready=" + classifierReady);
+        if (eiClassifier && classifierReady) {
+            try {
+                let r = eiClassifier.classify(new Float32Array(16000));
+                logMsg("🔬 Test: " + JSON.stringify(r).substring(0, 150));
+            } catch(e) { logMsg("🔬 Error: " + e); }
+        }
+    });
+
     function runAiInference(dataArray) {
         if (!classifierReady || !isAiEnabled) return;
-        
         let results = eiClassifier.classify(dataArray);
         if (!results) return;
 
         $('label-scores').innerText = results.map(r => r.label + ":" + Math.round(r.value*100) + "%").join("  ");
 
         let pullScore = null;
-        for (let r of results) {
-            if (r.label.toLowerCase() === "pull") { pullScore = r.value; break; }
-        }
-        if (pullScore === null) pullScore = results[0].value; // Fallback to primary label
+        for (let r of results) { if (r.label.toLowerCase() === "pull") { pullScore = r.value; break; } }
+        if (pullScore === null) pullScore = results[0].value; 
 
         let pct = Math.round(pullScore * 100);
         let triggerLevel = threshold / 100;
@@ -189,14 +173,11 @@
         if (pullScore >= triggerLevel && isVoiceMode) {
             if (micState === 0 && armedMode) processVoiceTrigger(pct, true);
         } else if (micState === 2 && pullScore < (triggerLevel * 0.5)) {
-            micState = 0;
-            $('vol-bar').style.background = "#0f0";
+            micState = 0; $('vol-bar').style.background = "#0f0";
         }
     }
 
-    // =========================================================
-    // AUDIO PIPELINE
-    // =========================================================
+    // --- MIC PIPELINE ---
     async function startMic() {
         try {
             audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -205,8 +186,7 @@
             if (audioContext.state === 'suspended') await audioContext.resume();
 
             isMicActive = true;
-            $('listenBtn').innerText = "Mute Mic 🎤";
-            $('listenBtn').style.background = "#dc3545";
+            $('listenBtn').innerText = "Mute Mic 🎤"; $('listenBtn').style.background = "#dc3545";
 
             const source = audioContext.createMediaStreamSource(audioStream);
             const analyser = audioContext.createAnalyser();
@@ -220,34 +200,29 @@
 
             aiProcessor.onaudioprocess = function(e) {
                 if (!isMicActive) return;
-                
-                const inputData = e.inputBuffer.getChannelData(0);
-                let chunk16k = inputData;
+                const rawChunk = e.inputBuffer.getChannelData(0);
+                let chunk16k = rawChunk;
                 
                 if (audioContext.sampleRate !== 16000) {
                     const ratio = audioContext.sampleRate / 16000;
-                    chunk16k = new Float32Array(Math.round(inputData.length / ratio));
-                    for (let i = 0; i < chunk16k.length; i++) chunk16k[i] = inputData[Math.floor(i * ratio)];
+                    chunk16k = new Float32Array(Math.round(rawChunk.length / ratio));
+                    for (let i = 0; i < chunk16k.length; i++) chunk16k[i] = rawChunk[Math.floor(i * ratio)];
                 }
 
-                let mean = 0;
-                for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i];
-                mean /= chunk16k.length;
+                let mean = 0; for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i]; mean /= chunk16k.length;
 
                 for (let i = 0; i < chunk16k.length; i++) {
                     let rawVal = chunk16k[i] - mean;
                     if (micState !== 1) {
                         let aiVal = rawVal * 32768.0 * 2.0; 
-                        if (aiVal > 32767) aiVal = 32767; 
-                        if (aiVal < -32768) aiVal = -32768;
+                        if (aiVal > 32767) aiVal = 32767; if (aiVal < -32768) aiVal = -32768;
                         audioDataBuffer.push(aiVal);
                     }
                 }
 
                 if (micState !== 1 && audioDataBuffer.length >= 16000) {
-                    const slice = new Float32Array(audioDataBuffer.slice(0, 16000));
-                    runAiInference(slice);
-                    audioDataBuffer = audioDataBuffer.slice(4000); // 250ms slide
+                    runAiInference(new Float32Array(audioDataBuffer.slice(0, 16000)));
+                    audioDataBuffer = audioDataBuffer.slice(4000); 
                 }
             };
 
@@ -258,7 +233,6 @@
                 let avgVol = sum / freqData.length;
                 $('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
 
-                // VOLUME FALLBACK (Runs if AI is OFF or hasn't loaded yet)
                 if (!classifierReady || !isAiEnabled) {
                     if (micState === 0 && avgVol > threshold && isVoiceMode) processVoiceTrigger(avgVol, false);
                     else if (micState === 2 && avgVol < (threshold * 0.8)) { micState = 0; $('vol-bar').style.background = "#0f0"; }
@@ -277,32 +251,19 @@
         if (animId) cancelAnimationFrame(animId);
         
         audioDataBuffer =[]; isMicActive = false; micState = 0;
-        
         if (resetUI) {
-            $('listenBtn').innerText = "Turn On Mic";
-            $('listenBtn').style.background = "#28A745";
-            $('vol-bar').style.background = "#0f0";
-            $('vol-bar').style.width = "0%";
+            $('listenBtn').innerText = "Turn On Mic"; $('listenBtn').style.background = "#28A745";
+            $('vol-bar').style.background = "#0f0"; $('vol-bar').style.width = "0%";
             logMsg("Mic Muted.");
         }
     }
 
-    $('listenBtn').addEventListener('click', async () => {
+    $('listenBtn').addEventListener('click', () => {
         if (isMicActive || wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; stopMic(true); }
         else { wasMicActiveBeforeSleep = false; startMic(); }
     });
 
-    document.addEventListener("visibilitychange", () => {
-        if (document.hidden) {
-            if (isMicActive) { wasMicActiveBeforeSleep = true; stopMic(false); $('listenBtn').innerText = "Mic Paused 💤"; }
-        } else {
-            if (wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; startMic(); }
-        }
-    });
-
-    // =========================================================
-    // UI, BLE & LOGIC
-    // =========================================================
+    // --- UI, SYNC & MODES ---
     $('syncBtn').addEventListener('click', () => {
         isSyncEnabled = !isSyncEnabled; 
         $('syncBtn').innerText = isSyncEnabled ? "Sync: ON" : "Sync: OFF";
@@ -313,7 +274,7 @@
         isVoiceMode = !isVoiceMode;
         $('vmBtn').innerText = isVoiceMode ? "Mode: VOICE" : "Mode: MANUAL";
         $('vmBtn').style.background = isVoiceMode ? "#9b59b6" : "#fd7e14";
-        if (!isVoiceMode) cancelMode(true);
+        if (!isVoiceMode) window.cancelMode(true);
         updateArmUI();
         if (isBleConnected && isSyncEnabled) sendBLECmd(isVoiceMode ? "MODE:VOICE" : "MODE:MANUAL", true);
     });
@@ -339,26 +300,24 @@
     function updateArmUI() {
         document.querySelectorAll('.arm-btn').forEach(b => b.classList.remove('active'));
         if (!isVoiceMode) {
-            $('arm-status').innerText = "MANUAL MODE (Tap to Fire)";
-            $('arm-status').style.color = "#fd7e14";
-            return;
+            $('arm-status').innerText = "MANUAL MODE (Tap to Fire)"; $('arm-status').style.color = "#fd7e14";
+            $('btn-T').innerText = "T (" + lastHouse + ")"; return;
         }
         if (armedMode) $('btn-' + armedMode).classList.add('active');
         if (!armedMode) { $('arm-status').innerText = "SAFE / DISARMED"; $('arm-status').style.color = "#aaa"; }
         else {
             $('arm-status').style.color = "#ff4444";
-            if      (armedMode === 'HL') $('arm-status').innerText = hlStep === 0 ? "ARMED: High -> Low" : "ARMED: Now Pulling Low";
+            if (armedMode === 'HL') $('arm-status').innerText = hlStep === 0 ? "ARMED: High -> Low" : "ARMED: Now Pulling Low";
             else if (armedMode === 'LH') $('arm-status').innerText = hlStep === 0 ? "ARMED: Low -> High" : "ARMED: Now Pulling High";
             else if (armedMode === 'T')  $('arm-status').innerText = "REPEATING: " + lastHouse;
-            else                         $('arm-status').innerText = "ARMED: " + armedMode;
+            else $('arm-status').innerText = "ARMED: " + armedMode;
         }
         $('btn-T').innerText = "T (" + lastHouse + ")";
     }
 
     window.cancelMode = function(fromSync = false) {
         armedMode = null; hlStep = 0; micState = 0; 
-        $('vol-bar').style.background = "#0f0"; 
-        $('md-display').style.color = "#aaa";
+        $('vol-bar').style.background = "#0f0"; $('md-display').style.color = "#aaa";
         updateArmUI();
         if (!fromSync && isBleConnected && isSyncEnabled) sendBLECmd("MODE:CANCEL", true);
     };
@@ -366,94 +325,82 @@
     window.setMode = function(mode, fromSync = false) {
         if (!isVoiceMode && !fromSync) {
             let cmd = '';
-            if      (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; }
+            if (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; }
             else if (mode==='D')  { cmd='D1H'; hlStep=0; lastHouse='D'; }
             else if (mode==='DR') { cmd='D1L'; hlStep=0; lastHouse='DR'; }
             else if (mode==='HL') { lastHouse='HL'; cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
             else if (mode==='LH') { lastHouse='LH'; cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
             else if (mode==='T') {
-                if      (lastHouse==='HL') { cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+                if (lastHouse==='HL') { cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
                 else if (lastHouse==='LH') { cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
-                else if (lastHouse==='D')  cmd='D1H';
-                else if (lastHouse==='DR') cmd='D1L';
-                else cmd=lastHouse;
+                else if (lastHouse==='D') cmd='D1H'; else if (lastHouse==='DR') cmd='D1L'; else cmd=lastHouse;
             }
             if (cmd) {
                 sendBLECmd(cmd);
                 if (isSyncEnabled) sendBLECmd("MODE:MAN_UPDATE:"+lastHouse+":"+hlStep, true);
-                const b = $('btn-'+mode);
-                if (b) { b.classList.add('active'); setTimeout(()=>b.classList.remove('active'),200); }
+                const b = $('btn-'+mode); if (b) { b.classList.add('active'); setTimeout(()=>b.classList.remove('active'),200); }
                 updateArmUI();
             }
             return;
         }
-        if (!fromSync) {
-            if (armedMode===mode) armedMode=null;
-            else { armedMode=mode; if(mode!=='T'&&mode!=='CANCEL') lastHouse=mode; }
-        } else {
-            armedMode=mode; if(mode!=='T'&&mode!==null&&mode!=='CANCEL') lastHouse=mode;
-        }
+        if (!fromSync) { if (armedMode===mode) armedMode=null; else { armedMode=mode; if(mode!=='T'&&mode!=='CANCEL') lastHouse=mode; } } 
+        else { armedMode=mode; if(mode!=='T'&&mode!==null&&mode!=='CANCEL') lastHouse=mode; }
         hlStep=0; updateArmUI();
         if (!fromSync&&isBleConnected&&isSyncEnabled&&isVoiceMode) sendBLECmd(armedMode?"MODE:"+armedMode+":"+lastHouse:"MODE:CANCEL", true);
     };
 
+    // --- BLE & TRIGGERS ---
     $('connectBtn').addEventListener('click', async () => {
-        if (isBleConnected) { if (bleDevice?.gatt.connected) bleDevice.gatt.disconnect(); return; }
+        if (isBleConnected) { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); return; }
         try {
             logMsg("Searching...");
-            bleDevice = await navigator.bluetooth.requestDevice({ filters:[{name:'BLUE Puller'}], optionalServices:[SERVICE_UUID] });
-            bleDevice.addEventListener('gattserverdisconnected', () => {
+            bleDev = await navigator.bluetooth.requestDevice({ filters:[{name:'BLUE Puller'}], optionalServices:[SERVICE_UUID] });
+            bleDev.addEventListener('gattserverdisconnected', () => {
                 isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; logMsg("Disconnected.");
             });
-            const server  = await bleDevice.gatt.connect();
-            const service = await server.getPrimaryService(SERVICE_UUID);
-            rxChar   = await service.getCharacteristic(CHAR_RX_UUID);
-            txChar = await service.getCharacteristic(CHAR_TX_UUID);
+            const server = await bleDev.gatt.connect(); const service = await server.getPrimaryService(SERVICE_UUID);
+            rxChar = await service.getCharacteristic(CHAR_RX_UUID); txChar = await service.getCharacteristic(CHAR_TX_UUID);
             await txChar.startNotifications();
-            txChar.addEventListener('characteristicvaluechanged', handleBleNotifications);
+            txChar.addEventListener('characteristicvaluechanged', (e) => {
+                let msg = new TextDecoder('utf-8').decode(e.target.value).trim();
+                if (!msg || msg.startsWith("Err:")) return;
+
+                if (msg.startsWith("MODE:")) {
+                    if (!isSyncEnabled) return;
+                    if (msg==="MODE:VOICE") { setVoiceMode(true,true); return; }
+                    if (msg==="MODE:MANUAL") { setVoiceMode(false,true); return; }
+                    let p=msg.split(":"); let st=p[1];
+                    if (st==="MAN_UPDATE") { lastHouse=p[2]; if(p[3]) hlStep=parseInt(p[3]); updateArmUI(); return; }
+                    if (p[2]) lastHouse=p[2];
+                    if (st==="CANCEL") window.cancelMode(true); else window.setMode(st,true);
+                    return;
+                }
+                if (msg.includes("STATUS:")) {
+                    let d=msg.match(/Delay: ([\d.]+)/), dd=msg.match(/Dbl: ([\d.]+)/), md=msg.match(/MD: (\d+)/);
+                    if(d) { dVal=parseFloat(d[1]); $('val-D').innerText=dVal.toFixed(1)+"s"; }
+                    if(dd) { ddVal=parseFloat(dd[1]); $('val-DD').innerText=ddVal.toFixed(1)+"s"; }
+                    if(md) { muteDelay=parseInt(md[1]);$('md-display').innerText="Mute Delay: "+muteDelay+"ms"; }
+                }
+                logMsg("📡: "+msg);
+            });
             isBleConnected = true;
             $('connectBtn').innerText = "Disconnect BLE"; $('connectBtn').style.background = "#dc3545";
             setTimeout(()=>sendBLECmd("?"),500);
         } catch(e) { logMsg("BLE Error: "+e); }
     });
 
-    function handleBleNotifications(event) {
-        let msg = new TextDecoder('utf-8').decode(event.target.value).trim();
-        if (!msg || msg.startsWith("Err:")) return;
-
-        if (msg.startsWith("MODE:")) {
-            if (!isSyncEnabled) return;
-            if (msg==="MODE:VOICE")  { setVoiceMode(true,true);  return; }
-            if (msg==="MODE:MANUAL") { setVoiceMode(false,true); return; }
-            let parts=msg.split(":"); let st=parts[1];
-            if (st==="MAN_UPDATE") { lastHouse=parts[2]; if(parts[3]) hlStep=parseInt(parts[3]); updateArmUI(); return; }
-            if (parts[2]) lastHouse=parts[2];
-            if (st==="CANCEL") cancelMode(true); else setMode(st,true);
-            return;
-        }
-        if (msg.includes("STATUS:")) {
-            let d=msg.match(/Delay: ([\d.]+)/), dd=msg.match(/Dbl: ([\d.]+)/), md=msg.match(/MD: (\d+)/);
-            if(d)  { dVal=parseFloat(d[1]);    $('val-D').innerText=dVal.toFixed(1)+"s"; }
-            if(dd) { ddVal=parseFloat(dd[1]);  $('val-DD').innerText=ddVal.toFixed(1)+"s"; }
-            if(md) { muteDelay=parseInt(md[1]);$('md-display').innerText="Mute Delay: "+muteDelay+"ms"; }
-        }
-        logMsg("📡: "+msg);
-    }
-
     async function processVoiceTrigger(level, isAi) {
         if (!armedMode || micState !== 0) return;
-        micState = 1; 
-        $('vol-bar').style.background = "#f00";
-        $('md-display').style.color = "#ff4444";
+        micState = 1; $('vol-bar').style.background = "#f00"; $('md-display').style.color = "#ff4444";
 
         let cmdToSend = '';
-        if      (armedMode === 'H' || armedMode === 'L') { cmdToSend = armedMode; cancelMode(false); }
-        else if (armedMode === 'D')  { cmdToSend = 'D1H'; cancelMode(false); }
-        else if (armedMode === 'DR') { cmdToSend = 'D1L'; cancelMode(false); }
-        else if (armedMode === 'HL') { if (hlStep === 0) { cmdToSend = 'H'; hlStep = 1; $('arm-status').innerText = "ARMED: Now Pulling Low"; } else { cmdToSend = 'L'; hlStep = 0; cancelMode(false); } }
-        else if (armedMode === 'LH') { if (hlStep === 0) { cmdToSend = 'L'; hlStep = 1; $('arm-status').innerText = "ARMED: Now Pulling High"; } else { cmdToSend = 'H'; hlStep = 0; cancelMode(false); } }
+        if (armedMode === 'H' || armedMode === 'L') { cmdToSend = armedMode; window.cancelMode(false); }
+        else if (armedMode === 'D')  { cmdToSend = 'D1H'; window.cancelMode(false); }
+        else if (armedMode === 'DR') { cmdToSend = 'D1L'; window.cancelMode(false); }
+        else if (armedMode === 'HL') { if (hlStep === 0) { cmdToSend = 'H'; hlStep = 1; $('arm-status').innerText = "ARMED: Now Pulling Low"; } else { cmdToSend = 'L'; hlStep = 0; window.cancelMode(false); } }
+        else if (armedMode === 'LH') { if (hlStep === 0) { cmdToSend = 'L'; hlStep = 1; $('arm-status').innerText = "ARMED: Now Pulling High"; } else { cmdToSend = 'H'; hlStep = 0; window.cancelMode(false); } }
         else if (armedMode === 'T')  {
-            if      (lastHouse === 'HL') { cmdToSend = (hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+            if (lastHouse === 'HL') { cmdToSend = (hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
             else if (lastHouse === 'LH') { cmdToSend = (hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
             else if (lastHouse === 'D')  cmdToSend = 'D1H';
             else if (lastHouse === 'DR') cmdToSend = 'D1L';
@@ -462,7 +409,7 @@
 
         updateArmUI();
         let tLock = (dVal * 1000) + muteDelay;
-        logMsg(`💥 FIRED! (${isAi ? 'AI' : 'Vol'}) Lockout: ${tLock}ms`);
+        logMsg(`💥 FIRED! (${isAi?'AI':'Vol'}) Lockout: ${tLock}ms`);
         if (cmdToSend !== '') await sendBLECmd(cmdToSend);
 
         setTimeout(() => {
@@ -476,7 +423,6 @@
             try { await rxChar.writeValue(new TextEncoder().encode(cmd)); if(!silent) logMsg("🚀 SENT: "+cmd); } catch(e) {}
         }
     }
-
 </script>
 </body>
 </html>
