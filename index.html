@@ -76,7 +76,8 @@
     
     let bleDev, rxChar, txChar, isBleConnected = false;
     let micState = 0, isMicActive = false, wasMicActiveBeforeSleep = false;
-    let audioContext, audioStream, animId, aiProcessor, audioDataBuffer =[];
+    let audioContext, audioStream, animId, aiProcessor;
+    let audioDataBuffer =[];
     
     let isAiEnabled = true, classifierReady = false, threshold = 40;
     let isSyncEnabled = true, isVoiceMode = true;
@@ -89,7 +90,11 @@
         threshold = parseInt(this.value); $('threshVal').innerText = threshold;
     };
 
-    // --- EDGE IMPULSE ---
+    // =========================================================
+    // EDGE IMPULSE ENGINE
+    // =========================================================
+    let eiClassifier = null; 
+
     class EdgeImpulseClassifier {
         _initialized = false;
         init() {
@@ -119,7 +124,17 @@
             return out;
         }
     }
-    let eiClassifier = null;
+
+    $('dumpBtn').addEventListener('click', () => {
+        if (!window.Module) { logMsg("❌ window.Module undefined"); return; }
+        logMsg("📦 Ready=" + classifierReady);
+        if (eiClassifier && classifierReady) {
+            try {
+                let r = eiClassifier.classify(new Float32Array(16000));
+                logMsg("🔬 Test result: " + JSON.stringify(r).substring(0, 200));
+            } catch(e) { logMsg("🔬 Test error: " + e); }
+        }
+    });
 
     function initAI() {
         logMsg("Loading AI Engine...");
@@ -131,37 +146,29 @@
                 eiClassifier = new EdgeImpulseClassifier();
                 await eiClassifier.init();
                 classifierReady = true;
-                logMsg("✅ AI Ready!");
+                logMsg("✅ AI Engine Ready!");
                 $('ai-confidence').innerText = "AI Confidence: Listening...";
             } else if (attempts > 50) { 
                 clearInterval(checkReady);
-                logMsg("❌ AI Failed to Load. Using Volume Mode.");
+                logMsg("❌ AI Engine Failed to Load.");
                 $('ai-confidence').innerText = "AI Failed - Volume Mode Active";
             }
         }, 100);
     }
     initAI();
 
-    $('dumpBtn').addEventListener('click', () => {
-        if (!window.Module) { logMsg("❌ Module undefined"); return; }
-        logMsg("📦 Ready=" + classifierReady);
-        if (eiClassifier && classifierReady) {
-            try {
-                let r = eiClassifier.classify(new Float32Array(16000));
-                logMsg("🔬 Test: " + JSON.stringify(r).substring(0, 150));
-            } catch(e) { logMsg("🔬 Error: " + e); }
-        }
-    });
-
     function runAiInference(dataArray) {
         if (!classifierReady || !isAiEnabled) return;
+        
         let results = eiClassifier.classify(dataArray);
         if (!results) return;
 
         $('label-scores').innerText = results.map(r => r.label + ":" + Math.round(r.value*100) + "%").join("  ");
 
         let pullScore = null;
-        for (let r of results) { if (r.label.toLowerCase() === "pull") { pullScore = r.value; break; } }
+        for (let r of results) {
+            if (r.label.toLowerCase() === "pull") { pullScore = r.value; break; }
+        }
         if (pullScore === null) pullScore = results[0].value; 
 
         let pct = Math.round(pullScore * 100);
@@ -177,7 +184,9 @@
         }
     }
 
-    // --- MIC PIPELINE ---
+    // =========================================================
+    // AUDIO PIPELINE (LATENCY FIX: ROLLING WINDOW)
+    // =========================================================
     async function startMic() {
         try {
             audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -200,19 +209,26 @@
 
             aiProcessor.onaudioprocess = function(e) {
                 if (!isMicActive) return;
-                const rawChunk = e.inputBuffer.getChannelData(0);
-                let chunk16k = rawChunk;
+                
+                const inputData = e.inputBuffer.getChannelData(0);
+                let chunk16k = inputData;
                 
                 if (audioContext.sampleRate !== 16000) {
                     const ratio = audioContext.sampleRate / 16000;
-                    chunk16k = new Float32Array(Math.round(rawChunk.length / ratio));
-                    for (let i = 0; i < chunk16k.length; i++) chunk16k[i] = rawChunk[Math.floor(i * ratio)];
+                    chunk16k = new Float32Array(Math.round(inputData.length / ratio));
+                    for (let i = 0; i < chunk16k.length; i++) chunk16k[i] = inputData[Math.floor(i * ratio)];
                 }
 
                 let mean = 0; for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i]; mean /= chunk16k.length;
 
+                let hasAudioEnergy = false;
+
                 for (let i = 0; i < chunk16k.length; i++) {
                     let rawVal = chunk16k[i] - mean;
+                    
+                    // Gate: Check if this chunk has actual noise to save CPU
+                    if (Math.abs(rawVal) > 0.02) hasAudioEnergy = true;
+
                     if (micState !== 1) {
                         let aiVal = rawVal * 32768.0 * 2.0; 
                         if (aiVal > 32767) aiVal = 32767; if (aiVal < -32768) aiVal = -32768;
@@ -220,9 +236,14 @@
                     }
                 }
 
-                if (micState !== 1 && audioDataBuffer.length >= 16000) {
-                    runAiInference(new Float32Array(audioDataBuffer.slice(0, 16000)));
-                    audioDataBuffer = audioDataBuffer.slice(4000); 
+                // LATENCY FIX: Keep buffer at exactly 16000 samples (Rolling Window)
+                if (audioDataBuffer.length > 16000) {
+                    audioDataBuffer = audioDataBuffer.slice(audioDataBuffer.length - 16000);
+                }
+
+                // Run inference INSTANTLY if buffer is full and someone is actually making noise
+                if (micState === 0 && audioDataBuffer.length === 16000 && hasAudioEnergy) {
+                    runAiInference(new Float32Array(audioDataBuffer));
                 }
             };
 
@@ -240,7 +261,7 @@
                 animId = requestAnimationFrame(checkVolume);
             }
             checkVolume();
-            logMsg("✅ Mic Activated.");
+            logMsg("✅ Mic Activated (Ultra-Low Latency).");
         } catch (err) { logMsg("Mic Error: " + err); stopMic(true); }
     }
 
@@ -251,6 +272,7 @@
         if (animId) cancelAnimationFrame(animId);
         
         audioDataBuffer =[]; isMicActive = false; micState = 0;
+        
         if (resetUI) {
             $('listenBtn').innerText = "Turn On Mic"; $('listenBtn').style.background = "#28A745";
             $('vol-bar').style.background = "#0f0"; $('vol-bar').style.width = "0%";
@@ -263,7 +285,17 @@
         else { wasMicActiveBeforeSleep = false; startMic(); }
     });
 
-    // --- UI, SYNC & MODES ---
+    document.addEventListener("visibilitychange", () => {
+        if (document.hidden) {
+            if (isMicActive) { wasMicActiveBeforeSleep = true; stopMic(false); $('listenBtn').innerText = "Mic Paused 💤"; }
+        } else {
+            if (wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; startMic(); }
+        }
+    });
+
+    // =========================================================
+    // UI, BLE & LOGIC
+    // =========================================================
     $('syncBtn').addEventListener('click', () => {
         isSyncEnabled = !isSyncEnabled; 
         $('syncBtn').innerText = isSyncEnabled ? "Sync: ON" : "Sync: OFF";
@@ -274,7 +306,7 @@
         isVoiceMode = !isVoiceMode;
         $('vmBtn').innerText = isVoiceMode ? "Mode: VOICE" : "Mode: MANUAL";
         $('vmBtn').style.background = isVoiceMode ? "#9b59b6" : "#fd7e14";
-        if (!isVoiceMode) window.cancelMode(true);
+        if (!isVoiceMode) cancelMode(true);
         updateArmUI();
         if (isBleConnected && isSyncEnabled) sendBLECmd(isVoiceMode ? "MODE:VOICE" : "MODE:MANUAL", true);
     });
@@ -307,7 +339,7 @@
         if (!armedMode) { $('arm-status').innerText = "SAFE / DISARMED"; $('arm-status').style.color = "#aaa"; }
         else {
             $('arm-status').style.color = "#ff4444";
-            if (armedMode === 'HL') $('arm-status').innerText = hlStep === 0 ? "ARMED: High -> Low" : "ARMED: Now Pulling Low";
+            if      (armedMode === 'HL') $('arm-status').innerText = hlStep === 0 ? "ARMED: High -> Low" : "ARMED: Now Pulling Low";
             else if (armedMode === 'LH') $('arm-status').innerText = hlStep === 0 ? "ARMED: Low -> High" : "ARMED: Now Pulling High";
             else if (armedMode === 'T')  $('arm-status').innerText = "REPEATING: " + lastHouse;
             else $('arm-status').innerText = "ARMED: " + armedMode;
@@ -325,15 +357,17 @@
     window.setMode = function(mode, fromSync = false) {
         if (!isVoiceMode && !fromSync) {
             let cmd = '';
-            if (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; }
+            if      (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; }
             else if (mode==='D')  { cmd='D1H'; hlStep=0; lastHouse='D'; }
             else if (mode==='DR') { cmd='D1L'; hlStep=0; lastHouse='DR'; }
             else if (mode==='HL') { lastHouse='HL'; cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
             else if (mode==='LH') { lastHouse='LH'; cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
             else if (mode==='T') {
-                if (lastHouse==='HL') { cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+                if      (lastHouse==='HL') { cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
                 else if (lastHouse==='LH') { cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
-                else if (lastHouse==='D') cmd='D1H'; else if (lastHouse==='DR') cmd='D1L'; else cmd=lastHouse;
+                else if (lastHouse==='D')  cmd='D1H';
+                else if (lastHouse==='DR') cmd='D1L';
+                else cmd=lastHouse;
             }
             if (cmd) {
                 sendBLECmd(cmd);
@@ -343,8 +377,12 @@
             }
             return;
         }
-        if (!fromSync) { if (armedMode===mode) armedMode=null; else { armedMode=mode; if(mode!=='T'&&mode!=='CANCEL') lastHouse=mode; } } 
-        else { armedMode=mode; if(mode!=='T'&&mode!==null&&mode!=='CANCEL') lastHouse=mode; }
+        if (!fromSync) {
+            if (armedMode===mode) armedMode=null;
+            else { armedMode=mode; if(mode!=='T'&&mode!=='CANCEL') lastHouse=mode; }
+        } else {
+            armedMode=mode; if(mode!=='T'&&mode!==null&&mode!=='CANCEL') lastHouse=mode;
+        }
         hlStep=0; updateArmUI();
         if (!fromSync&&isBleConnected&&isSyncEnabled&&isVoiceMode) sendBLECmd(armedMode?"MODE:"+armedMode+":"+lastHouse:"MODE:CANCEL", true);
     };
@@ -394,13 +432,13 @@
         micState = 1; $('vol-bar').style.background = "#f00"; $('md-display').style.color = "#ff4444";
 
         let cmdToSend = '';
-        if (armedMode === 'H' || armedMode === 'L') { cmdToSend = armedMode; window.cancelMode(false); }
+        if      (armedMode === 'H' || armedMode === 'L') { cmdToSend = armedMode; window.cancelMode(false); }
         else if (armedMode === 'D')  { cmdToSend = 'D1H'; window.cancelMode(false); }
         else if (armedMode === 'DR') { cmdToSend = 'D1L'; window.cancelMode(false); }
         else if (armedMode === 'HL') { if (hlStep === 0) { cmdToSend = 'H'; hlStep = 1; $('arm-status').innerText = "ARMED: Now Pulling Low"; } else { cmdToSend = 'L'; hlStep = 0; window.cancelMode(false); } }
         else if (armedMode === 'LH') { if (hlStep === 0) { cmdToSend = 'L'; hlStep = 1; $('arm-status').innerText = "ARMED: Now Pulling High"; } else { cmdToSend = 'H'; hlStep = 0; window.cancelMode(false); } }
         else if (armedMode === 'T')  {
-            if (lastHouse === 'HL') { cmdToSend = (hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+            if      (lastHouse === 'HL') { cmdToSend = (hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
             else if (lastHouse === 'LH') { cmdToSend = (hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
             else if (lastHouse === 'D')  cmdToSend = 'D1H';
             else if (lastHouse === 'DR') cmdToSend = 'D1L';
@@ -409,11 +447,11 @@
 
         updateArmUI();
         let tLock = (dVal * 1000) + muteDelay;
-        logMsg(`💥 FIRED! (${isAi?'AI':'Vol'}) Lockout: ${tLock}ms`);
+        logMsg(`💥 FIRED! (${isAi ? 'AI ' : 'Vol '}${Math.round(level)}%) Lockout: ${tLock}ms`);
         if (cmdToSend !== '') await sendBLECmd(cmdToSend);
 
         setTimeout(() => {
-            micState = 2; audioDataBuffer = new Array(0);
+            micState = 2; audioDataBuffer = new Array(0); // Safely clear buffer
             $('vol-bar').style.background = "#f39c12"; $('md-display').style.color = "#aaa";
         }, tLock);
     }
@@ -423,6 +461,7 @@
             try { await rxChar.writeValue(new TextEncoder().encode(cmd)); if(!silent) logMsg("🚀 SENT: "+cmd); } catch(e) {}
         }
     }
+
 </script>
 </body>
 </html>
