@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Calibration Dataset Builder</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- JSZip Library for bundling files (Requires WiFi on first load to cache!) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <style>
+        body { font-family: Arial; text-align: center; margin-top: 15px; background: #222; color: white;}
+        h2 { margin-bottom: 5px; color: #00d2ff; }
+        
+        .section-title { font-size: 14px; color: #aaa; margin: 15px 0 5px; text-transform: uppercase; letter-spacing: 1px;}
+        
+        .row { display: flex; justify-content: center; gap: 8px; margin: 5px 3%; flex-wrap: wrap;}
+        button { padding: 12px 5px; font-size: 16px; border-radius: 8px; font-weight: bold; border: 2px solid transparent; cursor: pointer; transition: 0.2s;}
+        
+        /* Label Buttons */
+        .lbl-btn { flex: 1 1 20%; background: #444; color: white; border-color: #222; }
+        .lbl-btn.active { background: #9b59b6; border-color: #fff; color: white; }
+        
+        /* Rec Buttons */
+        .rec-btn { flex: 1; background: #28A745; color: white; }
+        .rec-btn:disabled { background: #555; color: #888; cursor: not-allowed; }
+        .rec-btn.recording { background: #e74c3c; animation: pulse 1s infinite; }
+        
+        /* Cart UI */
+        #cart-panel { background: #333; margin: 15px 5%; padding: 15px; border-radius: 8px; border: 1px solid #555; }
+        .cart-stats { font-size: 18px; font-weight: bold; color: #fff; margin-bottom: 10px; }
+        .ram-warn { color: #ffeb3b; font-size: 14px; display: none; margin-bottom: 10px; font-weight: bold;}
+        .ram-danger { color: #ff4444; font-size: 14px; display: none; margin-bottom: 10px; font-weight: bold;}
+        
+        .export-btn { background: #007BFF; color: white; width: 100%; padding: 15px; font-size: 18px; margin-bottom: 10px;}
+        .clear-btn { background: #8b0000; color: white; width: 100%; padding: 10px; font-size: 14px; }
+        
+        #log { margin-top: 15px; color: #0f0; text-align: left; padding: 8px; font-size: 12px; background: #111; height: 150px; overflow-y: scroll; border: 1px solid #444;}
+        
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+    </style>
+</head>
+<body>
+
+    <h2>AI Dataset Builder</h2>
+    <div style="font-size: 12px; color: #888; margin-bottom: 15px;">16kHz Mono PCM Audio</div>
+
+    <div class="section-title">1. Select Label</div>
+    <div class="row">
+        <button id="lbl-pull" class="lbl-btn active" onclick="setLabel('pull')">PULL</button>
+        <button id="lbl-noise" class="lbl-btn" onclick="setLabel('noise')">NOISE</button>
+        <button id="lbl-speech" class="lbl-btn" onclick="setLabel('speech')">SPEECH</button>
+        <button id="lbl-unknown" class="lbl-btn" onclick="setLabel('unknown')">UNKNOWN</button>
+    </div>
+
+    <div class="section-title">2. Record Audio</div>
+    <div class="row">
+        <button id="rec-1s" class="rec-btn" onclick="startRecording(1)">1 Sec</button>
+        <button id="rec-3s" class="rec-btn" onclick="startRecording(3)">3 Sec</button>
+        <button id="rec-cont" class="rec-btn" onclick="toggleContinuous()">Continuous</button>
+    </div>
+
+    <div id="cart-panel">
+        <div class="cart-stats">Files in Cart: <span id="cart-count" style="color:#0f0;">0</span></div>
+        <div style="font-size: 14px; color: #aaa; margin-bottom: 10px;">RAM Usage: <span id="cart-ram">0.00</span> MB</div>
+        
+        <div id="ram-warn" class="ram-warn">⚠️ Approaching iOS Memory Limit. Export soon!</div>
+        <div id="ram-danger" class="ram-danger">🚨 RAM FULL! Export ZIP immediately!</div>
+
+        <button id="exportBtn" class="export-btn" onclick="exportZip()" disabled>Export ZIP</button>
+        <button id="clearBtn" class="clear-btn" onclick="clearCart()" disabled>Clear Cart (Delete Unsaved)</button>
+    </div>
+
+    <div id="log">--- Debug Log ---<br></div>
+
+<script>
+    const $ = id => document.getElementById(id);
+    
+    let currentLabel = 'pull';
+    let isRecording = false;
+    let isContinuous = false;
+    let maxContSeconds = 60; // Hard limit for continuous recording
+    let recordingTimer = null;
+    
+    // Persistent sequential ID tracker
+    let globalId = parseInt(localStorage.getItem('ei_seq_id')) || 1;
+
+    let audioContext, audioStream, processor;
+    let audioDataBuffer =[];
+    
+    // The Shopping Cart
+    let cart =[]; // Array of objects: { filename, blob, size }
+    let totalBytes = 0;
+
+    function logMsg(msg) {
+        $('log').innerHTML = msg + "<br>" + $('log').innerHTML;
+        $('log').scrollTop = $('log').scrollHeight; // Auto-scroll
+    }
+
+    function setLabel(label) {
+        if (isRecording) return;
+        currentLabel = label;
+        document.querySelectorAll('.lbl-btn').forEach(btn => btn.classList.remove('active'));
+        $('lbl-' + label).classList.add('active');
+        logMsg(`🏷️ Label set to: ${label.toUpperCase()}`);
+    }
+
+    function toggleButtons(disabled) {
+        $('rec-1s').disabled = disabled;
+        $('rec-3s').disabled = disabled;
+        document.querySelectorAll('.lbl-btn').forEach(btn => btn.disabled = disabled);
+        
+        if (disabled && !isContinuous) {
+            $('rec-cont').disabled = true;
+        } else if (!disabled) {
+            $('rec-cont').disabled = false;
+        }
+    }
+
+    async function initMic() {
+        if (audioStream) return true; // Already initialized
+        try {
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+            window.AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioContext = new window.AudioContext({ sampleRate: 16000 });
+            if (audioContext.state === 'suspended') await audioContext.resume();
+            return true;
+        } catch (err) {
+            logMsg("❌ Mic Access Denied: " + err.message);
+            return false;
+        }
+    }
+
+    async function startRecording(durationSeconds) {
+        if (isRecording) return;
+        if (!(await initMic())) return;
+
+        isRecording = true;
+        audioDataBuffer =[];
+        toggleButtons(true);
+
+        const btnId = durationSeconds === 1 ? 'rec-1s' : (durationSeconds === 3 ? 'rec-3s' : 'rec-cont');
+        const btn = $(btnId);
+        
+        if (durationSeconds === 60) {
+            isContinuous = true;
+            btn.innerText = "🛑 STOP (Max 60s)";
+        } else {
+            btn.innerText = "🔴 Rec...";
+        }
+        btn.classList.add('recording');
+        
+        logMsg(`⏺️ Recording ${currentLabel} for ${durationSeconds === 60 ? 'up to 60' : durationSeconds}s...`);
+
+        const source = audioContext.createMediaStreamSource(audioStream);
+        processor = audioContext.createScriptProcessor(4096, 1, 1);
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+
+        processor.onaudioprocess = function(e) {
+            if (!isRecording) return;
+            const inputData = e.inputBuffer.getChannelData(0);
+            
+            // Downsample if iOS ignored 16kHz
+            let chunk16k = inputData;
+            if (audioContext.sampleRate !== 16000) {
+                const ratio = audioContext.sampleRate / 16000;
+                chunk16k = new Float32Array(Math.round(inputData.length / ratio));
+                for (let i = 0; i < chunk16k.length; i++) chunk16k[i] = inputData[Math.floor(i * ratio)];
+            }
+
+            for (let i = 0; i < chunk16k.length; i++) {
+                audioDataBuffer.push(chunk16k[i]);
+            }
+        };
+
+        // Set the timer to auto-stop
+        recordingTimer = setTimeout(() => {
+            stopRecording(btn, durationSeconds === 60 ? 'Continuous' : `${durationSeconds} Sec`);
+        }, durationSeconds * 1000);
+    }
+
+    function toggleContinuous() {
+        if (isContinuous) {
+            // Stop pressed manually
+            clearTimeout(recordingTimer);
+            stopRecording($('rec-cont'), 'Continuous');
+        } else {
+            startRecording(maxContSeconds);
+        }
+    }
+
+    function stopRecording(btn, originalText) {
+        isRecording = false;
+        isContinuous = false;
+        
+        if (processor) {
+            processor.disconnect();
+            processor = null;
+        }
+
+        btn.innerText = originalText;
+        btn.classList.remove('recording');
+        toggleButtons(false);
+
+        if (audioDataBuffer.length > 0) {
+            processAndSaveWav(new Float32Array(audioDataBuffer));
+        } else {
+            logMsg("⚠️ Error: No audio data captured.");
+        }
+    }
+
+    function processAndSaveWav(float32Array) {
+        // Build 16-bit PCM WAV
+        const numSamples = float32Array.length;
+        const buffer = new ArrayBuffer(44 + numSamples * 2);
+        const view = new DataView(buffer);
+        
+        function writeStr(off, str) { for (let i=0; i<str.length; i++) view.setUint8(off+i, str.charCodeAt(i)); }
+        
+        writeStr(0, 'RIFF');
+        view.setUint32(4, 36 + numSamples * 2, true);
+        writeStr(8, 'WAVE');
+        writeStr(12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true); // PCM
+        view.setUint16(22, 1, true); // Mono
+        view.setUint32(24, 16000, true); // 16kHz
+        view.setUint32(28, 16000 * 2, true); // Byte rate
+        view.setUint16(32, 2, true); // Block align
+        view.setUint16(34, 16, true); // Bits per sample
+        writeStr(36, 'data');
+        view.setUint32(40, numSamples * 2, true);
+
+        // Convert Float32 to Int16
+        for (let i = 0; i < numSamples; i++) {
+            let s = Math.max(-1, Math.min(1, float32Array[i]));
+            view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        }
+
+        const blob = new Blob([buffer], { type: 'audio/wav' });
+        
+        // Naming: label.ID.wav
+        const filename = `${currentLabel}.${globalId}.wav`;
+        globalId++;
+        localStorage.setItem('ei_seq_id', globalId);
+
+        // Add to Cart
+        cart.push({ filename: filename, blob: blob, size: blob.size });
+        totalBytes += blob.size;
+
+        logMsg(`✅ Saved: <b>${filename}</b> (${(blob.size/1024).toFixed(1)} KB)`);
+        updateCartUI();
+    }
+
+    function updateCartUI() {
+        $('cart-count').innerText = cart.length;
+        
+        let mb = (totalBytes / 1048576).toFixed(2);
+        $('cart-ram').innerText = mb;
+
+        $('exportBtn').disabled = cart.length === 0;
+        $('clearBtn').disabled = cart.length === 0;
+
+        // RAM Warnings (iOS Safari limits single tabs to around ~200MB, but 50MB is a safe "Export Now" threshold)
+        if (mb > 50) {
+            $('ram-danger').style.display = 'block';
+            $('ram-warn').style.display = 'none';
+        } else if (mb > 35) {
+            $('ram-warn').style.display = 'block';
+            $('ram-danger').style.display = 'none';
+        } else {
+            $('ram-warn').style.display = 'none';
+            $('ram-danger').style.display = 'none';
+        }
+    }
+
+    function clearCart() {
+        if (confirm("Are you sure you want to delete all unsaved recordings in the cart?")) {
+            cart =
