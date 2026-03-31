@@ -251,7 +251,8 @@
                 document.getElementById('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
 
                 // Fallback if AI isn't loaded
-                if (!classifierReady) {
+               // Fallback if AI isn't loaded OR if AI is turned OFF
+                if (!classifierReady || !isAiEnabled) {
                     if (micState === 0 && avgVol > threshold && isVoiceMode) processVoiceTrigger(avgVol, false);
                     else if (micState === 2 && avgVol < (threshold * 0.8)) { micState = 0; document.getElementById('vol-bar').style.background = "#0f0"; }
                 }
@@ -301,7 +302,20 @@
         document.getElementById('syncBtn').innerText = isSyncEnabled ? "Sync: ON" : "Sync: OFF";
         document.getElementById('syncBtn').style.background = isSyncEnabled ? "#17a2b8" : "#6c757d";
     });
-
+document.getElementById('aiBtn').addEventListener('click', () => {
+        isAiEnabled = !isAiEnabled;
+        const btn = document.getElementById('aiBtn');
+        if (isAiEnabled) {
+            btn.innerText = "AI: ON"; 
+            btn.style.background = "#27ae60";
+            document.getElementById('ai-confidence').innerText = classifierReady ? "AI Confidence: Listening..." : "AI: engine not loaded";
+        } else {
+            btn.innerText = "AI: OFF (Vol)"; 
+            btn.style.background = "#6c757d";
+            document.getElementById('ai-confidence').innerText = "AI off — volume mode";
+            document.getElementById('label-scores').innerText = "—";
+        }
+    });
     document.getElementById('vmBtn').addEventListener('click', () => {
         isVoiceMode = !isVoiceMode;
         document.getElementById('vmBtn').innerText = isVoiceMode ? "Mode: VOICE" : "Mode: MANUAL";
