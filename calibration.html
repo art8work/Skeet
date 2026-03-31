@@ -215,43 +215,44 @@
             cart =[]; totalBytes = 0; updateCartUI(); logMsg("🗑️ Cart Cleared.");
         }
     }
-
-    // --- 5. ZIP EXPORT ---
+// --- 5. ZIP EXPORT (BLUEFY / iOS FIX) ---
     async function exportZip() {
         if (cart.length === 0) return;
-        $('exportBtn').innerText = "Zipping..."; $('exportBtn').disabled = true;
+        $('exportBtn').innerText = "Zipping..."; 
+        $('exportBtn').disabled = true;
         logMsg("📦 Bundling " + cart.length + " files into ZIP...");
         
         try {
             let zip = new JSZip();
-            cart.forEach(item => { zip.file(item.name, item.blob); });
+            cart.forEach(i => zip.file(i.name, i.blob));
+            let content = await zip.generateAsync({type: "blob"});
+            let file = new File([content], `Dataset_${Date.now()}.zip`, {type: "application/zip"});
+
+            if (navigator.share && navigator.canShare && navigator.canShare({files: [file]})) {
+                await navigator.share({files: [file], title: 'Skeet Data'});
+                logMsg("✅ Sent to iOS Share menu.");
+            } else {
+                let url = URL.createObjectURL(content);
+                let a = document.createElement("a");
+                a.href = url; a.download = file.name; a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+                logMsg("✅ Used fallback download.");
+            }
             
-            let content = await zip.generateAsync({ type: "blob" });
-            let filename = `Dataset_${Date.now()}.zip`;
+           // Clear cart safely
+            cart.length = 0; 
+            totalBytes = 0; 
+            updateCartUI();
             
-            // iOS Download Trigger
-            let url = URL.createObjectURL(content);
-            let a = document.createElement("a");
-            a.style.display = "none";
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            
-            setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
-            
-            logMsg(`✅ <b>Success!</b> Save ${filename} to your files.`);
-            $('exportBtn').innerText = "Export ZIP to Files";
-            $('exportBtn').disabled = false;
-            
-            // Auto clear cart after prompt
-            cart =[]; totalBytes = 0; updateCartUI();
         } catch (e) {
             logMsg("❌ ZIP Error: " + e.message);
+        } finally {
+            // Reset Button
             $('exportBtn').innerText = "Export ZIP to Files";
             $('exportBtn').disabled = false;
         }
     }
+  
 </script>
 </body>
 </html>
