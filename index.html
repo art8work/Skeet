@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V31</title>
+    <title>AI Skeet Puller V32</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="edge-impulse-standalone.js?v=31"></script>
+    <script src="edge-impulse-standalone.js?v=32"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
         .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
@@ -11,9 +11,17 @@
         .top-btn { flex: 1; } .arm-btn { flex: 1 1 22%; background: #444; color: white;}
         .arm-btn.active { background: #e74c3c; color: white; }
         #arm-status { font-size: 18px; font-weight: bold; color: #aaa; margin: 8px 0; }
+        
         .delay-row { display: flex; justify-content: space-between; align-items: center; margin: 6px 5%; background: #333; padding: 6px 12px; border-radius: 8px; }
         .delay-btn { background: #555; color: white; padding: 4px 14px; font-size: 18px; border-radius: 5px;}
-        .rand-btn { background: #555; color: white; padding: 4px 10px; font-size: 16px; border-radius: 5px; margin-right: 8px; transition: 0.3s;}
+        
+        /* 3-Way Segmented Control CSS */
+        .seg-ctrl { display:inline-flex; background:#111; border-radius:6px; overflow:hidden; border: 1px solid #444; }
+        .seg-btn { padding: 4px 8px; font-size: 12px; font-weight: bold; cursor: pointer; background: #222; color: #888; transition: 0.2s;}
+        .seg-btn.active.off { background: #e74c3c; color: #fff; }
+        .seg-btn.active.on { background: #007BFF; color: #fff; }
+        .seg-btn.active.rdm { background: #27ae60; color: #fff; }
+
         #vol-bar-container { width: 90%; height: 18px; background: #444; margin: 10px auto 4px; border-radius: 9px; overflow: hidden; }
         #vol-bar { width: 0%; height: 100%; background: #0f0; transition: width 0.05s; }
         #ai-confidence { font-size: 16px; font-weight: bold; color: #0f0; margin: 4px 0; }
@@ -33,7 +41,7 @@
         <div style="font-size: 24px; cursor: pointer;" onclick="promptAdmin()">⚙️</div>
     </div>
 
-    <h2 id="appTitle" style="margin-top:0;">AI Puller V31</h2>
+    <h2 id="appTitle" style="margin-top:0;">AI Puller V32</h2>
     
     <div class="row">
         <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
@@ -61,11 +69,15 @@
         <button id="btn-CANCEL" class="arm-btn" style="background:#8b0000;" onclick="cancelMode()">CANCEL</button>
     </div>
 
-    <!-- DELAY CONTROLS (Random 'R' Button moved to far left) -->
+    <!-- 3-WAY DELAY CONTROLS -->
     <div class="delay-row">
-        <div style="display:flex; align-items:center;">
-            <button id="btn-rand-D" class="rand-btn" onclick="toggleRand('D')">R</button>
-            <b>Delay (D):</b>
+        <div style="display:flex; flex-direction:column; align-items:flex-start;">
+            <div style="font-weight:bold; margin-bottom:4px;">Delay (D):</div>
+            <div class="seg-ctrl">
+                <div id="mode-D-0" class="seg-btn active off" onclick="setDMode('D', 0)">OFF</div>
+                <div id="mode-D-1" class="seg-btn" onclick="setDMode('D', 1)">ON</div>
+                <div id="mode-D-2" class="seg-btn" onclick="setDMode('D', 2)">RDM</div>
+            </div>
         </div>
         <div>
             <button class="delay-btn" onclick="adjDelay('D', -0.1)">-</button> 
@@ -73,10 +85,15 @@
             <button class="delay-btn" onclick="adjDelay('D', 0.1)">+</button>
         </div>
     </div>
+    
     <div class="delay-row">
-        <div style="display:flex; align-items:center;">
-            <button id="btn-rand-DD" class="rand-btn" onclick="toggleRand('DD')">R</button>
-            <b>Dbl Dly (DD):</b>
+        <div style="display:flex; flex-direction:column; align-items:flex-start;">
+            <div style="font-weight:bold; margin-bottom:4px;">Dbl Dly (DD):</div>
+            <div class="seg-ctrl">
+                <div id="mode-DD-0" class="seg-btn active off" onclick="setDMode('DD', 0)">OFF</div>
+                <div id="mode-DD-1" class="seg-btn" onclick="setDMode('DD', 1)">ON</div>
+                <div id="mode-DD-2" class="seg-btn" onclick="setDMode('DD', 2)">RDM</div>
+            </div>
         </div>
         <div>
             <button class="delay-btn" onclick="adjDelay('DD', -0.1)">-</button> 
@@ -89,31 +106,24 @@
     <div id="ai-confidence">AI: Waiting for engine...</div>
     <div id="label-scores">—</div>
 
-    <label>AI Confidence Trigger %: <b id="threshVal" style="color:#ffeb3b;">40</b></label><br>
+    <label>Trigger Sensitivity / AI %: <b id="threshVal" style="color:#ffeb3b;">40</b></label><br>
     <input type="range" id="threshSlider" min="5" max="95" value="40" style="width:80%; margin-top:5px;">
 
     <div id="md-display" style="color:#aaa; font-weight:bold; margin-top:8px;">Mute Delay: 500ms</div>
     <div id="log">--- Debug Log ---<br></div>
 
-    <!-- ADMIN MODAL -->
     <div id="adminModal">
         <div class="admin-box">
             <h3 style="color:#00d2ff;">Maintenance Menu</h3>
-            
             <label>Rename Puller</label><br>
             <input type="text" id="newNameInput" class="admin-input" placeholder="Puller Name"><br>
             <button style="background:#28A745; width:100%; margin-top:5px; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="renameDevice()">Save Name & Reboot</button>
-            
             <hr style="border-color:#555; margin: 15px 0;">
-            
             <label>Set Field Number</label><br>
             <input type="number" id="newFieldInput" class="admin-input" placeholder="Field Number"><br>
             <button style="background:#007BFF; width:100%; margin-top:5px; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="setField()">Save Field</button>
-            
             <hr style="border-color:#555; margin: 15px 0;">
-            
             <button id="btn-swap" style="background:#6c757d; width:100%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="toggleSwap()">Swap Relays (H/L): OFF</button>
-            
             <br><br>
             <button style="background:#888; width:100%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="document.getElementById('adminModal').style.display='none'">Close</button>
         </div>
@@ -133,14 +143,17 @@
     let isAiEnabled = true, classifierReady = false, threshold = 40;
     let isSyncEnabled = true, isVoiceMode = true;
     let armedMode = null, hlStep = 0, lastHouse = 'H';
-    let dVal = 0.0, ddVal = 0.0, muteDelay = 500, fieldId = 1;
-    let isRandD = false, isRandDD = false, isSwap = false;
+    let muteDelay = 500, fieldId = 1, isSwap = false;
+    
+    // UI states for 3-way toggle (Cache memory for restoring delays)
+    let dVal = 0.0, cacheD = 1.5, isRandD = false;
+    let ddVal = 0.0, cacheDD = 1.5, isRandDD = false;
 
     function logMsg(msg) { $('log').innerHTML = msg + "<br>" + $('log').innerHTML; }
 
     $('threshSlider').oninput = function() { threshold = parseInt(this.value); $('threshVal').innerText = threshold; };
 
-    // --- ADMIN & RANDOM LOGIC ---
+    // --- ADMIN LOGIC ---
     window.promptAdmin = function() {
         let pin = prompt("Enter Maintenance PIN:");
         if (pin === "3368") $('adminModal').style.display = 'flex';
@@ -160,38 +173,55 @@
         if (!fId) return;
         sendBLECmd("FIELD:" + fId);
     }
-    
-    // UPDATED: Now toggles UI locally immediately
     window.toggleSwap = function() {
         isSwap = !isSwap;
         $('btn-swap').innerText = isSwap ? "Swap Relays (H/L): ON" : "Swap Relays (H/L): OFF";
         $('btn-swap').style.background = isSwap ? "#e74c3c" : "#6c757d";
         if (isBleConnected) sendBLECmd("SWAP:" + (isSwap ? "1" : "0"));
     }
-    window.toggleRand = function(type) {
-        if (type === 'D') { 
-            isRandD = !isRandD; 
-            $('btn-rand-D').style.background = isRandD ? '#27ae60' : '#555';
-            if (isBleConnected) sendBLECmd("RD:" + (isRandD ? "1" : "0")); 
-        } else { 
-            isRandDD = !isRandDD; 
-            $('btn-rand-DD').style.background = isRandDD ? '#27ae60' : '#555';
-            if (isBleConnected) sendBLECmd("RDD:" + (isRandDD ? "1" : "0")); 
-        }
-    }
 
-    // UPDATED: Delays fixed (no longer locked behind BLE, safe floating-point math)
-    window.adjDelay = function(type, amt) {
-        if (type === 'D') { 
-            dVal = Math.max(0, parseFloat((dVal + amt).toFixed(1))); 
-            $('val-D').innerText = dVal.toFixed(1) + "s"; 
-            if (isBleConnected) sendBLECmd("D" + dVal.toFixed(1)); 
-        } else { 
-            ddVal = Math.max(0, parseFloat((ddVal + amt).toFixed(1))); 
-            $('val-DD').innerText = ddVal.toFixed(1) + "s"; 
-            if (isBleConnected) sendBLECmd("DD" + ddVal.toFixed(1)); 
+    // --- 3-WAY DELAY CONTROLS ---
+    window.setDMode = function(type, mode) {
+        if (!isBleConnected) return;
+        if (type === 'D') {
+            if (mode === 0) { sendBLECmd("D0.0"); }
+            else {
+                sendBLECmd("RD:" + (mode === 2 ? "1" : "0"));
+                sendBLECmd("D" + (dVal > 0 ? dVal : cacheD).toFixed(1));
+            }
+        } else {
+            if (mode === 0) { sendBLECmd("DD0.0"); }
+            else {
+                sendBLECmd("RDD:" + (mode === 2 ? "1" : "0"));
+                sendBLECmd("DD" + (ddVal > 0 ? ddVal : cacheDD).toFixed(1));
+            }
         }
     };
+
+    window.adjDelay = function(type, amt) {
+        if (!isBleConnected) return;
+        if (type === 'D') { 
+            let nextVal = Math.max(0, dVal + amt);
+            if (dVal > 0) cacheD = nextVal; // Save to cache
+            if (dVal > 0) sendBLECmd("D" + nextVal.toFixed(1)); 
+        } else { 
+            let nextVal = Math.max(0, ddVal + amt);
+            if (ddVal > 0) cacheDD = nextVal; // Save to cache
+            if (ddVal > 0) sendBLECmd("DD" + nextVal.toFixed(1)); 
+        }
+    };
+
+    function updateDModeUI() {
+        let mD = (dVal === 0) ? 0 : (isRandD ? 2 : 1);
+        $('mode-D-0').className = "seg-btn " + (mD===0 ? "active off" : "");
+        $('mode-D-1').className = "seg-btn " + (mD===1 ? "active on" : "");
+        $('mode-D-2').className = "seg-btn " + (mD===2 ? "active rdm" : "");
+
+        let mDD = (ddVal === 0) ? 0 : (isRandDD ? 2 : 1);
+        $('mode-DD-0').className = "seg-btn " + (mDD===0 ? "active off" : "");
+        $('mode-DD-1').className = "seg-btn " + (mDD===1 ? "active on" : "");
+        $('mode-DD-2').className = "seg-btn " + (mDD===2 ? "active rdm" : "");
+    }
 
     // --- EDGE IMPULSE ---
     let eiClassifier = null; 
@@ -255,7 +285,6 @@
         if (!results) return;
 
         $('label-scores').innerText = results.map(r => r.label + ":" + Math.round(r.value*100) + "%").join("  ");
-
         let pullScore = null;
         for (let r of results) { if (r.label.toLowerCase() === "pull") { pullScore = r.value; break; } }
         if (pullScore === null) pullScore = results[0].value; 
@@ -318,14 +347,8 @@
                         audioDataBuffer.push(aiVal);
                     }
                 }
-
-                if (audioDataBuffer.length > 16000) {
-                    audioDataBuffer = audioDataBuffer.slice(audioDataBuffer.length - 16000);
-                }
-
-                if (micState === 0 && audioDataBuffer.length === 16000 && hasAudioEnergy) {
-                    runAiInference(new Float32Array(audioDataBuffer));
-                }
+                if (audioDataBuffer.length > 16000) audioDataBuffer = audioDataBuffer.slice(audioDataBuffer.length - 16000);
+                if (micState === 0 && audioDataBuffer.length === 16000 && hasAudioEnergy) runAiInference(new Float32Array(audioDataBuffer));
             };
 
             function checkVolume() {
@@ -360,17 +383,20 @@
         }
     }
 
+    // AUTOMATIC BEHAVIORAL LINKAGES
     $('listenBtn').addEventListener('click', () => {
-        if (isMicActive || wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; stopMic(true); }
-        else { wasMicActiveBeforeSleep = false; startMic(); }
+        if (isMicActive || wasMicActiveBeforeSleep) { 
+            wasMicActiveBeforeSleep = false; stopMic(true); 
+        } else { 
+            wasMicActiveBeforeSleep = false; 
+            if (!isVoiceMode) setVoiceMode(true, false); // Auto-Voice Mode
+            startMic(); 
+        }
     });
 
     document.addEventListener("visibilitychange", () => {
-        if (document.hidden) {
-            if (isMicActive) { wasMicActiveBeforeSleep = true; stopMic(false); $('listenBtn').innerText = "Mic Paused 💤"; }
-        } else {
-            if (wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; startMic(); }
-        }
+        if (document.hidden) { if (isMicActive) { wasMicActiveBeforeSleep = true; stopMic(false); $('listenBtn').innerText = "Mic Paused 💤"; } } 
+        else { if (wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; startMic(); } }
     });
 
     // --- UI, BLE & LOGIC ---
@@ -381,12 +407,7 @@
     });
 
     $('vmBtn').addEventListener('click', () => {
-        isVoiceMode = !isVoiceMode;
-        $('vmBtn').innerText = isVoiceMode ? "Mode: VOICE" : "Mode: MANUAL";
-        $('vmBtn').style.background = isVoiceMode ? "#9b59b6" : "#fd7e14";
-        if (!isVoiceMode) cancelMode(true);
-        updateArmUI();
-        if (isBleConnected && isSyncEnabled) sendBLECmd(isVoiceMode ? "MODE:VOICE" : "MODE:MANUAL", true);
+        setVoiceMode(!isVoiceMode, false);
     });
 
     $('aiBtn').addEventListener('click', () => {
@@ -400,6 +421,25 @@
             $('label-scores').innerText = "—";
         }
     });
+
+    function setVoiceMode(voiceEnabled, fromSync = false) {
+        isVoiceMode = voiceEnabled;
+        if (isVoiceMode) { 
+            $('vmBtn').innerText = "Mode: VOICE"; $('vmBtn').style.background = "#9b59b6"; 
+        } else { 
+            $('vmBtn').innerText = "Mode: MANUAL"; $('vmBtn').style.background = "#fd7e14"; 
+            cancelMode(true); 
+            // Auto-Disable AI in Manual
+            if (isAiEnabled && !fromSync) {
+                isAiEnabled = false;
+                $('aiBtn').innerText = "AI: OFF (Vol)"; $('aiBtn').style.background = "#6c757d";
+                $('ai-confidence').innerText = "AI off — volume mode active";
+                $('label-scores').innerText = "—";
+            }
+        }
+        updateArmUI();
+        if (!fromSync && isBleConnected && isSyncEnabled) sendBLECmd(isVoiceMode ? "MODE:VOICE" : "MODE:MANUAL", true);
+    }
 
     function updateArmUI() {
         document.querySelectorAll('.arm-btn').forEach(b => b.classList.remove('active'));
@@ -462,10 +502,11 @@
     $('connectBtn').addEventListener('click', async () => {
         if (isBleConnected) { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); return; }
         try {
+            logMsg("Searching...");
             bleDev = await navigator.bluetooth.requestDevice({ filters:[{services:[SERVICE_UUID]}] });
             bleDev.addEventListener('gattserverdisconnected', () => {
                 isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; 
-                $('appTitle').innerText = "AI Puller V31"; logMsg("Disconnected.");
+                $('appTitle').innerText = "AI Puller V32"; logMsg("Disconnected.");
             });
             const server = await bleDev.gatt.connect(); const service = await server.getPrimaryService(SERVICE_UUID);
             rxChar = await service.getCharacteristic(CHAR_RX_UUID); txChar = await service.getCharacteristic(CHAR_TX_UUID);
@@ -486,34 +527,35 @@
                     return;
                 }
                 
-                if (msg.startsWith("RD SET:")) { isRandD = msg.includes("1"); $('btn-rand-D').style.background = isRandD ? '#27ae60' : '#555'; }
-                if (msg.startsWith("RDD SET:")) { isRandDD = msg.includes("1"); $('btn-rand-DD').style.background = isRandDD ? '#27ae60' : '#555'; }
+                if (msg.startsWith("RD SET:")) { isRandD = msg.includes("1"); updateDModeUI(); }
+                if (msg.startsWith("RDD SET:")) { isRandDD = msg.includes("1"); updateDModeUI(); }
                 if (msg.startsWith("SWAP SET:")) { 
                     isSwap = msg.includes("1"); 
                     $('btn-swap').innerText = isSwap ? "Swap Relays (H/L): ON" : "Swap Relays (H/L): OFF";
                     $('btn-swap').style.background = isSwap ? "#e74c3c" : "#6c757d";
                 }
 
-                if (msg.includes("Delay Set:")) { let match = msg.match(/Delay Set: ([\d\.]+)/); if (match) { dVal = parseFloat(match[1]); $('val-D').innerText = dVal.toFixed(1)+"s"; } }
-                if (msg.includes("Dbl Dly Set:")) { let match = msg.match(/Dbl Dly Set: ([\d\.]+)/); if (match) { ddVal = parseFloat(match[1]); $('val-DD').innerText = ddVal.toFixed(1)+"s"; } }
+                if (msg.includes("Delay Set:")) { let match = msg.match(/Delay Set: ([\d\.]+)/); if (match) { dVal = parseFloat(match[1]); if(dVal>0) cacheD=dVal; $('val-D').innerText = dVal.toFixed(1)+"s"; updateDModeUI(); } }
+                if (msg.includes("Dbl Dly Set:")) { let match = msg.match(/Dbl Dly Set: ([\d\.]+)/); if (match) { ddVal = parseFloat(match[1]); if(ddVal>0) cacheDD=ddVal; $('val-DD').innerText = ddVal.toFixed(1)+"s"; updateDModeUI(); } }
                 if (msg.includes("MD Set:")) { let match = msg.match(/MD Set: (\d+)/); if (match) { muteDelay = parseInt(match[1]); } }
                 if (msg.includes("Field Set:")) { let m=msg.match(/Field Set: (\d+)/); if(m){ fieldId=parseInt(m[1]); $('field-display').innerText="Field: "+fieldId; } }
 
                 if (msg.includes("STATUS:")) {
                     let d=msg.match(/Delay: ([\d.]+)/), dd=msg.match(/Dbl: ([\d.]+)/), md=msg.match(/MD: (\d+)/), fd=msg.match(/Field: (\d+)/);
                     let rd=msg.match(/RD: (\d)/), rdd=msg.match(/RDD: (\d)/), swp=msg.match(/SWAP: (\d)/);
-                    if(d) { dVal=parseFloat(d[1]); $('val-D').innerText=dVal.toFixed(1)+"s"; }
-                    if(dd) { ddVal=parseFloat(dd[1]); $('val-DD').innerText=ddVal.toFixed(1)+"s"; }
+                    if(d) { dVal=parseFloat(d[1]); if(dVal>0) cacheD=dVal; $('val-D').innerText=dVal.toFixed(1)+"s"; }
+                    if(dd) { ddVal=parseFloat(dd[1]); if(ddVal>0) cacheDD=ddVal; $('val-DD').innerText=ddVal.toFixed(1)+"s"; }
                     if(md) { muteDelay=parseInt(md[1]); }
                     if(fd) { fieldId=parseInt(fd[1]); $('field-display').innerText="Field: "+fieldId; }
                     
-                    if(rd) { isRandD = (rd[1]==='1'); $('btn-rand-D').style.background = isRandD ? '#27ae60' : '#555'; }
-                    if(rdd) { isRandDD = (rdd[1]==='1'); $('btn-rand-DD').style.background = isRandDD ? '#27ae60' : '#555'; }
+                    if(rd) { isRandD = (rd[1]==='1'); }
+                    if(rdd) { isRandDD = (rdd[1]==='1'); }
                     if(swp) { 
                         isSwap = (swp[1]==='1'); 
                         $('btn-swap').innerText = isSwap ? "Swap Relays (H/L): ON" : "Swap Relays (H/L): OFF";
                         $('btn-swap').style.background = isSwap ? "#e74c3c" : "#6c757d";
                     }
+                    updateDModeUI();
                 }
             });
             isBleConnected = true;
@@ -552,7 +594,7 @@
 
     async function sendBLECmd(cmd, silent=false) {
         if (rxChar && isBleConnected) {
-            try { await rxChar.writeValue(new TextEncoder().encode(cmd)); } catch(e) {}
+            try { await rxChar.writeValue(new TextEncoder().encode(cmd)); if(!silent) logMsg("🚀 SENT: "+cmd); } catch(e) {}
         }
     }
 </script>
