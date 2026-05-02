@@ -20,7 +20,7 @@
         .seg-btn { padding: 4px 8px; font-size: 12px; font-weight: bold; cursor: pointer; background: #222; color: #888; transition: 0.2s;}
         .seg-btn.active.off { background: #e74c3c; color: #fff; }
         .seg-btn.active.on { background: #007BFF; color: #fff; }
-        .seg-btn.active.rdm { background: #27ae60; color: #fff; }
+        .seg-btn.active.RANDOM { background: #27ae60; color: #fff; }
 
         #vol-bar-container { width: 90%; height: 18px; background: #444; margin: 10px auto 4px; border-radius: 9px; overflow: hidden; }
         #vol-bar { width: 0%; height: 100%; background: #0f0; transition: width 0.05s; }
@@ -76,7 +76,7 @@
             <div class="seg-ctrl">
                 <div id="mode-D-0" class="seg-btn active off" onclick="setDMode('D', 0)">OFF</div>
                 <div id="mode-D-1" class="seg-btn" onclick="setDMode('D', 1)">ON</div>
-                <div id="mode-D-2" class="seg-btn" onclick="setDMode('D', 2)">RDM</div>
+                <div id="mode-D-2" class="seg-btn" onclick="setDMode('D', 2)">RANDOM</div>
             </div>
         </div>
         <div>
@@ -92,7 +92,7 @@
             <div class="seg-ctrl">
                 <div id="mode-DD-0" class="seg-btn active off" onclick="setDMode('DD', 0)">OFF</div>
                 <div id="mode-DD-1" class="seg-btn" onclick="setDMode('DD', 1)">ON</div>
-                <div id="mode-DD-2" class="seg-btn" onclick="setDMode('DD', 2)">RDM</div>
+                <div id="mode-DD-2" class="seg-btn" onclick="setDMode('DD', 2)">RANDOM</div>
             </div>
         </div>
         <div>
@@ -215,12 +215,12 @@
         let mD = (dVal === 0) ? 0 : (isRandD ? 2 : 1);
         $('mode-D-0').className = "seg-btn " + (mD===0 ? "active off" : "");
         $('mode-D-1').className = "seg-btn " + (mD===1 ? "active on" : "");
-        $('mode-D-2').className = "seg-btn " + (mD===2 ? "active rdm" : "");
+        $('mode-D-2').className = "seg-btn " + (mD===2 ? "active RANDOM" : "");
 
         let mDD = (ddVal === 0) ? 0 : (isRandDD ? 2 : 1);
         $('mode-DD-0').className = "seg-btn " + (mDD===0 ? "active off" : "");
         $('mode-DD-1').className = "seg-btn " + (mDD===1 ? "active on" : "");
-        $('mode-DD-2').className = "seg-btn " + (mDD===2 ? "active rdm" : "");
+        $('mode-DD-2').className = "seg-btn " + (mDD===2 ? "active RANDOM" : "");
     }
 
     // --- EDGE IMPULSE ---
