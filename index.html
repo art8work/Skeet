@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V33</title>
+    <title>AI Skeet Puller V34</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="edge-impulse-standalone.js?v=33"></script>
+    <script src="edge-impulse-standalone.js?v=34"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
         .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
@@ -25,9 +25,14 @@
         #log { margin-top: 10px; color: #0f0; text-align: left; padding: 8px; font-size: 12px; background: #111; height: 130px; overflow-y: scroll; border: 1px solid #444;}
         
         #adminModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 100; justify-content: center; align-items: center;}
-        .admin-box { background: #333; padding: 20px; border-radius: 10px; width: 80%; max-width: 400px; border: 2px solid #00d2ff;}
+        .admin-box { background: #333; padding: 15px; border-radius: 10px; width: 90%; max-width: 400px; border: 2px solid #00d2ff; max-height: 90vh; overflow-y:auto;}
         .admin-input { width: 90%; padding: 10px; font-size: 16px; margin: 10px 0; border-radius: 5px; border: 1px solid #ccc; text-align: center;}
         #header-area { display: flex; justify-content: space-between; align-items: center; padding: 0 15px; }
+        
+        /* Stats Table */
+        .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left; font-size: 14px; background: #222; padding: 10px; border-radius: 8px; margin-bottom: 10px;}
+        .stat-item span { font-weight: bold; color: #0f0; float: right; }
+        select { background: #555; color: white; border: none; padding: 5px; border-radius: 4px; font-weight: bold; font-size: 14px;}
     </style>
 </head>
 <body>
@@ -37,7 +42,7 @@
         <div style="font-size: 24px; cursor: pointer;" onclick="promptAdmin()">⚙️</div>
     </div>
 
-    <h2 id="appTitle" style="margin-top:0;">AI Puller V33</h2>
+    <h2 id="appTitle" style="margin-top:0;">AI Puller V34</h2>
     
     <div class="row">
         <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
@@ -109,27 +114,49 @@
     <!-- ADMIN MODAL -->
     <div id="adminModal">
         <div class="admin-box">
-            <h3 style="color:#00d2ff;">Maintenance Menu</h3>
-            <label>Rename Puller</label><br>
-            <input type="text" id="newNameInput" class="admin-input" placeholder="Puller Name"><br>
-            <button style="background:#28A745; width:100%; margin-top:5px; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="renameDevice()">Save Name & Reboot</button>
-            <hr style="border-color:#555; margin: 15px 0;">
-            <label>Set Field Number</label><br>
-            <input type="number" id="newFieldInput" class="admin-input" placeholder="Field Number"><br>
-            <button style="background:#007BFF; width:100%; margin-top:5px; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="setField()">Save Field</button>
-            <hr style="border-color:#555; margin: 15px 0;">
-            <button id="btn-swap" style="background:#6c757d; width:100%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="toggleSwap()">Swap Relays (H/L): OFF</button>
+            <h3 style="color:#00d2ff; margin-top:0;">Maintenance & Rewire</h3>
+            
+            <div style="display:flex; gap:10px;">
+                <input type="text" id="newNameInput" class="admin-input" placeholder="Name (e.g. Puller F1)">
+                <input type="number" id="newFieldInput" class="admin-input" placeholder="Field #">
+            </div>
+            <button style="background:#007BFF; width:100%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="saveNames()">Save Name & Field</button>
             
             <hr style="border-color:#555; margin: 15px 0;">
-            <label>Relay Usage Stats</label><br>
-            <div style="display:flex; justify-content:space-around; font-size:14px; margin: 5px 0;">
-                <div>High (CH): <b id="stat-ch" style="color:#0f0;">--</b></div>
-                <div>Low (CL): <b id="stat-cl" style="color:#0f0;">--</b></div>
+            
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <b>Relay Stats:</b>
+                <button style="background:#17a2b8; padding:5px 15px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="sendBLECmd('STATS')">Fetch</button>
             </div>
-            <div style="display:flex; gap:10px; margin-top:10px;">
-                <button style="background:#17a2b8; width:50%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="sendBLECmd('STATS')">Fetch</button>
-                <button style="background:#8b0000; width:50%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="resetStats()">Reset</button>
+            <div class="stat-grid">
+                <div class="stat-item">R1 (Pin 1): <span id="s-r1">0</span></div>
+                <div class="stat-item">R2 (Pin 2): <span id="s-r2">0</span></div>
+                <div class="stat-item">R3 (Pin 41): <span id="s-r3">0</span></div>
+                <div class="stat-item">R4 (Pin 42): <span id="s-r4">0</span></div>
+                <div class="stat-item">R5 (Pin 45): <span id="s-r5">0</span></div>
+                <div class="stat-item">R6 (Pin 46): <span id="s-r6">0</span></div>
             </div>
+
+            <b>Current Wiring Map:</b>
+            <div style="display:flex; justify-content:space-between; margin-top:8px; background:#222; padding:10px; border-radius:8px;">
+                <div>
+                    <div>High House</div>
+                    <select id="sel-high">
+                        <option value="0">R1 (Pin 1)</option><option value="1">R2 (Pin 2)</option>
+                        <option value="2">R3 (Pin 41)</option><option value="3">R4 (Pin 42)</option>
+                        <option value="4">R5 (Pin 45)</option><option value="5">R6 (Pin 46)</option>
+                    </select>
+                </div>
+                <div>
+                    <div>Low House</div>
+                    <select id="sel-low">
+                        <option value="0">R1 (Pin 1)</option><option value="1" selected>R2 (Pin 2)</option>
+                        <option value="2">R3 (Pin 41)</option><option value="3">R4 (Pin 42)</option>
+                        <option value="4">R5 (Pin 45)</option><option value="5">R6 (Pin 46)</option>
+                    </select>
+                </div>
+            </div>
+            <button style="background:#28A745; width:100%; margin-top:10px; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="saveWiring()">Save Wiring</button>
 
             <br><br>
             <button style="background:#888; width:100%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="document.getElementById('adminModal').style.display='none'">Close</button>
@@ -163,21 +190,23 @@
         if (pin === "3368") { $('adminModal').style.display = 'flex'; if(isBleConnected) sendBLECmd("STATS", true); }
         else if (pin !== null) alert("Incorrect PIN");
     }
-    window.renameDevice = function() {
+    window.saveNames = function() {
         if (!isBleConnected) return;
-        let newName = $('newNameInput').value.trim();
-        if (newName === "") return;
-        sendBLECmd("NAME:" + newName); $('adminModal').style.display = 'none';
-        setTimeout(() => { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); }, 500);
+        let nName = $('newNameInput').value.trim();
+        let fId = $('newFieldInput').value;
+        if (fId) sendBLECmd("FIELD:" + fId);
+        if (nName !== "") {
+            sendBLECmd("NAME:" + nName);
+            $('adminModal').style.display = 'none';
+            setTimeout(() => { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); }, 500);
+        }
     }
-    window.setField = function() { if (!isBleConnected) return; let fId = $('newFieldInput').value; if (!fId) return; sendBLECmd("FIELD:" + fId); }
-    window.toggleSwap = function() {
-        isSwap = !isSwap; $('btn-swap').innerText = isSwap ? "Swap Relays (H/L): ON" : "Swap Relays (H/L): OFF";
-        $('btn-swap').style.background = isSwap ? "#e74c3c" : "#6c757d";
-        if (isBleConnected) sendBLECmd("SWAP:" + (isSwap ? "1" : "0"));
-    }
-    window.resetStats = function() {
-        if(confirm("DANGER: Reset relay counts to zero?")) { sendBLECmd("RESET_STATS"); $('stat-ch').innerText = "0"; $('stat-cl').innerText = "0"; }
+    window.saveWiring = function() {
+        if (!isBleConnected) return;
+        let h = $('sel-high').value;
+        let l = $('sel-low').value;
+        sendBLECmd(`REWIRE:${h}:${l}`);
+        logMsg("⚙️ Wiring updated!");
     }
 
     // --- 3-WAY DELAY CONTROLS ---
@@ -194,25 +223,15 @@
 
     window.adjDelay = function(type, amt) {
         if (!isBleConnected) return;
-        if (type === 'D') { 
-            let nextVal = Math.max(0, dVal + amt); if (dVal > 0) cacheD = nextVal; 
-            if (dVal > 0) sendBLECmd("D" + nextVal.toFixed(1)); 
-        } else { 
-            let nextVal = Math.max(0, ddVal + amt); if (ddVal > 0) cacheDD = nextVal; 
-            if (ddVal > 0) sendBLECmd("DD" + nextVal.toFixed(1)); 
-        }
+        if (type === 'D') { let n = Math.max(0, dVal + amt); if (dVal > 0) cacheD = n; if (dVal > 0) sendBLECmd("D" + n.toFixed(1)); } 
+        else { let n = Math.max(0, ddVal + amt); if (ddVal > 0) cacheDD = n; if (ddVal > 0) sendBLECmd("DD" + n.toFixed(1)); }
     };
 
     function updateDModeUI() {
         let mD = (dVal === 0) ? 0 : (isRandD ? 2 : 1);
-        $('mode-D-0').className = "seg-btn " + (mD===0 ? "active off" : "");
-        $('mode-D-1').className = "seg-btn " + (mD===1 ? "active on" : "");
-        $('mode-D-2').className = "seg-btn " + (mD===2 ? "active rdm" : "");
-
+        $('mode-D-0').className = "seg-btn " + (mD===0 ? "active off" : ""); $('mode-D-1').className = "seg-btn " + (mD===1 ? "active on" : ""); $('mode-D-2').className = "seg-btn " + (mD===2 ? "active rdm" : "");
         let mDD = (ddVal === 0) ? 0 : (isRandDD ? 2 : 1);
-        $('mode-DD-0').className = "seg-btn " + (mDD===0 ? "active off" : "");
-        $('mode-DD-1').className = "seg-btn " + (mDD===1 ? "active on" : "");
-        $('mode-DD-2').className = "seg-btn " + (mDD===2 ? "active rdm" : "");
+        $('mode-DD-0').className = "seg-btn " + (mDD===0 ? "active off" : ""); $('mode-DD-1').className = "seg-btn " + (mDD===1 ? "active on" : ""); $('mode-DD-2').className = "seg-btn " + (mDD===2 ? "active rdm" : "");
     }
 
     // --- EDGE IMPULSE ---
@@ -227,7 +246,7 @@
             });
         }
         classify(rawData) {
-            if (!this._initialized) throw new Error('Not init');
+            if (!this._initialized) throw new Error('Not initialized');
             const ptr = Module._malloc(rawData.length * 4); Module.HEAPF32.set(rawData, ptr >> 2);
             let ret = Module.run_classifier(ptr, rawData.length, false); Module._free(ptr);
             if (ret.result !== 0) return null; let out =[];
@@ -267,8 +286,9 @@
         $('ai-confidence').innerText = "AI Confidence: " + pct + "%";
         $('ai-confidence').style.color = (pullScore >= triggerLevel) ? "#f00" : "#0f0";
 
-        if (pullScore >= triggerLevel && isVoiceMode) { if (micState === 0 && armedMode) processVoiceTrigger(pct, true); } 
-        else if (micState === 2 && pullScore < (triggerLevel * 0.5)) { micState = 0; $('vol-bar').style.background = "#0f0"; }
+        if (pullScore >= triggerLevel && isVoiceMode) {
+            if (micState === 0 && armedMode) processVoiceTrigger(pct, true);
+        } else if (micState === 2 && pullScore < (triggerLevel * 0.5)) { micState = 0; $('vol-bar').style.background = "#0f0"; }
     }
 
     // --- MIC PIPELINE ---
@@ -295,6 +315,7 @@
                     const ratio = audioContext.sampleRate / 16000; chunk16k = new Float32Array(Math.round(rawChunk.length / ratio));
                     for (let i = 0; i < chunk16k.length; i++) chunk16k[i] = rawChunk[Math.floor(i * ratio)];
                 }
+
                 let mean = 0; for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i]; mean /= chunk16k.length;
                 let hasAudioEnergy = false;
                 for (let i = 0; i < chunk16k.length; i++) {
@@ -313,6 +334,7 @@
                 if (!isMicActive) return;
                 analyser.getByteFrequencyData(freqData); let sum = 0; for(let i=0; i<freqData.length; i++) sum += freqData[i];
                 let avgVol = sum / freqData.length; $('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
+
                 if (!classifierReady || !isAiEnabled) {
                     if (micState === 0 && avgVol > threshold && isVoiceMode) processVoiceTrigger(avgVol, false);
                     else if (micState === 2 && avgVol < (threshold * 0.8)) { micState = 0; $('vol-bar').style.background = "#0f0"; }
@@ -365,9 +387,9 @@
         if (!armedMode) { $('arm-status').innerText = "SAFE / DISARMED"; $('arm-status').style.color = "#aaa"; }
         else {
             $('arm-status').style.color = "#ff4444";
-            if (armedMode === 'HL') $('arm-status').innerText = hlStep === 0 ? "ARMED: High -> Low" : "ARMED: Now Pulling Low";
+            if      (armedMode === 'HL') $('arm-status').innerText = hlStep === 0 ? "ARMED: High -> Low" : "ARMED: Now Pulling Low";
             else if (armedMode === 'LH') $('arm-status').innerText = hlStep === 0 ? "ARMED: Low -> High" : "ARMED: Now Pulling High";
-            else if (armedMode === 'T') $('arm-status').innerText = "REPEATING: " + lastHouse;
+            else if (armedMode === 'T')  $('arm-status').innerText = "REPEATING: " + lastHouse;
             else $('arm-status').innerText = "ARMED: " + armedMode;
         }
         $('btn-T').innerText = "T (" + lastHouse + ")";
@@ -381,7 +403,7 @@
     window.setMode = function(mode, fromSync = false) {
         if (!isVoiceMode && !fromSync) {
             let cmd = '';
-            if (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; } else if (mode==='D') { cmd='D1H'; hlStep=0; lastHouse='D'; } else if (mode==='DR') { cmd='D1L'; hlStep=0; lastHouse='DR'; }
+            if      (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; } else if (mode==='D') { cmd='D1H'; hlStep=0; lastHouse='D'; } else if (mode==='DR') { cmd='D1L'; hlStep=0; lastHouse='DR'; }
             else if (mode==='HL') { lastHouse='HL'; cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; } else if (mode==='LH') { lastHouse='LH'; cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
             else if (mode==='T') {
                 if (lastHouse==='HL') { cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; } else if (lastHouse==='LH') { cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
@@ -401,7 +423,7 @@
         try {
             bleDev = await navigator.bluetooth.requestDevice({ filters:[{services:[SERVICE_UUID]}] });
             bleDev.addEventListener('gattserverdisconnected', () => {
-                isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; $('appTitle').innerText = "AI Puller V33";
+                isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; $('appTitle').innerText = "AI Puller V34";
             });
             const server = await bleDev.gatt.connect(); const service = await server.getPrimaryService(SERVICE_UUID);
             rxChar = await service.getCharacteristic(CHAR_RX_UUID); txChar = await service.getCharacteristic(CHAR_TX_UUID);
@@ -411,9 +433,14 @@
                 if (!msg || msg.startsWith("Err:")) return;
 
                 // STATS RECEIVER
-                if (msg.startsWith("STATS:CH:")) {
-                    let m = msg.match(/STATS:CH:(\d+):CL:(\d+)/);
-                    if (m) { $('stat-ch').innerText = m[1]; $('stat-cl').innerText = m[2]; }
+                if (msg.startsWith("STATS:")) {
+                    let p = msg.split(":");
+                    let cts = p[1].split(",");
+                    let rts = p[2].split(",");
+                    
+                    for(let i=0; i<6; i++) $(`s-r${i+1}`).innerText = cts[i];
+                    $('sel-high').value = rts[0];
+                    $('sel-low').value = rts[1];
                     return;
                 }
 
@@ -430,22 +457,21 @@
                 
                 if (msg.startsWith("RD SET:")) { isRandD = msg.includes("1"); updateDModeUI(); }
                 if (msg.startsWith("RDD SET:")) { isRandDD = msg.includes("1"); updateDModeUI(); }
-                if (msg.startsWith("SWAP SET:")) { isSwap = msg.includes("1"); $('btn-swap').innerText = isSwap ? "Swap Relays (H/L): ON" : "Swap Relays (H/L): OFF"; $('btn-swap').style.background = isSwap ? "#e74c3c" : "#6c757d"; }
 
                 if (msg.includes("Delay Set:")) { let m = msg.match(/Delay Set: ([\d\.]+)/); if (m) { dVal = parseFloat(m[1]); if(dVal>0) cacheD=dVal; $('val-D').innerText = dVal.toFixed(1)+"s"; updateDModeUI(); } }
-                if (msg.includes("Dbl Dly Set:")) { let m = msg.match(/Dbl Dly Set: ([\d\.]+)/); if (match) { ddVal = parseFloat(m[1]); if(ddVal>0) cacheDD=ddVal; $('val-DD').innerText = ddVal.toFixed(1)+"s"; updateDModeUI(); } }
+                if (msg.includes("Dbl Dly Set:")) { let m = msg.match(/Dbl Dly Set: ([\d\.]+)/); if (m) { ddVal = parseFloat(m[1]); if(ddVal>0) cacheDD=ddVal; $('val-DD').innerText = ddVal.toFixed(1)+"s"; updateDModeUI(); } }
                 if (msg.includes("MD Set:")) { let m = msg.match(/MD Set: (\d+)/); if (m) { muteDelay = parseInt(m[1]); } }
                 if (msg.includes("Field Set:")) { let m=msg.match(/Field Set: (\d+)/); if(m){ fieldId=parseInt(m[1]); $('field-display').innerText="Field: "+fieldId; } }
 
                 if (msg.includes("STATUS:")) {
                     let d=msg.match(/Delay: ([\d.]+)/), dd=msg.match(/Dbl: ([\d.]+)/), md=msg.match(/MD: (\d+)/), fd=msg.match(/Field: (\d+)/);
-                    let rd=msg.match(/RD: (\d)/), rdd=msg.match(/RDD: (\d)/), swp=msg.match(/SWAP: (\d)/);
+                    let rd=msg.match(/RD: (\d)/), rdd=msg.match(/RDD: (\d)/);
                     if(d) { dVal=parseFloat(d[1]); if(dVal>0) cacheD=dVal; $('val-D').innerText=dVal.toFixed(1)+"s"; }
                     if(dd) { ddVal=parseFloat(dd[1]); if(ddVal>0) cacheDD=ddVal; $('val-DD').innerText=ddVal.toFixed(1)+"s"; }
                     if(md) { muteDelay=parseInt(md[1]); }
                     if(fd) { fieldId=parseInt(fd[1]); $('field-display').innerText="Field: "+fieldId; }
+                    
                     if(rd) { isRandD = (rd[1]==='1'); } if(rdd) { isRandDD = (rdd[1]==='1'); }
-                    if(swp) { isSwap = (swp[1]==='1'); $('btn-swap').innerText = isSwap ? "Swap Relays (H/L): ON" : "Swap Relays (H/L): OFF"; $('btn-swap').style.background = isSwap ? "#e74c3c" : "#6c757d"; }
                     updateDModeUI();
                 }
             });
@@ -457,7 +483,7 @@
 
     async function processVoiceTrigger(level, isAi) {
         if (!armedMode || micState !== 0) return;
-        micState = 1; $('vol-bar').style.background = "#f00"; $('md-display').style.color = "#ff4444";
+        micState = 1; $('vol-bar').style.background = "#f00";
 
         let cmdToSend = '';
         if (armedMode === 'H' || armedMode === 'L') { cmdToSend = armedMode; window.cancelMode(false); }
@@ -479,7 +505,7 @@
 
         setTimeout(() => {
             micState = 2; audioDataBuffer = new Array(16000).fill(0);
-            $('vol-bar').style.background = "#f39c12"; $('md-display').style.color = "#aaa";
+            $('vol-bar').style.background = "#f39c12"; 
         }, tLock);
     }
 
