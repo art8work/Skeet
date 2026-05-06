@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V34</title>
+    <title>AI Skeet Puller V35</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="edge-impulse-standalone.js?v=34"></script>
+    <script src="edge-impulse-standalone.js?v=35"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
         .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
@@ -29,7 +29,6 @@
         .admin-input { width: 90%; padding: 10px; font-size: 16px; margin: 10px 0; border-radius: 5px; border: 1px solid #ccc; text-align: center;}
         #header-area { display: flex; justify-content: space-between; align-items: center; padding: 0 15px; }
         
-        /* Stats Table */
         .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left; font-size: 14px; background: #222; padding: 10px; border-radius: 8px; margin-bottom: 10px;}
         .stat-item span { font-weight: bold; color: #0f0; float: right; }
         select { background: #555; color: white; border: none; padding: 5px; border-radius: 4px; font-weight: bold; font-size: 14px;}
@@ -42,7 +41,7 @@
         <div style="font-size: 24px; cursor: pointer;" onclick="promptAdmin()">⚙️</div>
     </div>
 
-    <h2 id="appTitle" style="margin-top:0;">AI Puller V34</h2>
+    <h2 id="appTitle" style="margin-top:0;">AI Puller V35</h2>
     
     <div class="row">
         <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
@@ -120,7 +119,7 @@
                 <input type="text" id="newNameInput" class="admin-input" placeholder="Name (e.g. Puller F1)">
                 <input type="number" id="newFieldInput" class="admin-input" placeholder="Field #">
             </div>
-            <button style="background:#007BFF; width:100%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="saveNames()">Save Name & Field</button>
+            <button style="background:#28A745; width:100%; margin-top:5px; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="saveNames()">Save Name & Field</button>
             
             <hr style="border-color:#555; margin: 15px 0;">
             
@@ -158,21 +157,20 @@
             </div>
             <button style="background:#28A745; width:100%; margin-top:10px; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="saveWiring()">Save Wiring</button>
 
-            <br><br>
+            <hr style="border-color:#555; margin: 15px 0;">
+            <button style="background:#8b0000; width:100%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white; margin-bottom: 10px;" onclick="resetStats()">DANGER: Reset Stats</button>
+
             <button style="background:#888; width:100%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="document.getElementById('adminModal').style.display='none'">Close</button>
         </div>
     </div>
 
 <script>
     const $ = id => document.getElementById(id);
-    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
-    const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
-    const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e", CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e", CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
     
     let bleDev, rxChar, txChar, isBleConnected = false;
     let micState = 0, isMicActive = false, wasMicActiveBeforeSleep = false;
-    let audioContext, audioStream, animId, aiProcessor;
-    let audioDataBuffer = new Array(16000).fill(0); 
+    let audioContext, audioStream, animId, aiProcessor, audioDataBuffer = new Array(16000).fill(0); 
     
     let isAiEnabled = true, classifierReady = false, threshold = 40;
     let isSyncEnabled = true, isVoiceMode = true;
@@ -196,28 +194,25 @@
         let fId = $('newFieldInput').value;
         if (fId) sendBLECmd("FIELD:" + fId);
         if (nName !== "") {
-            sendBLECmd("NAME:" + nName);
-            $('adminModal').style.display = 'none';
+            sendBLECmd("NAME:" + nName); $('adminModal').style.display = 'none';
             setTimeout(() => { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); }, 500);
         }
     }
     window.saveWiring = function() {
         if (!isBleConnected) return;
-        let h = $('sel-high').value;
-        let l = $('sel-low').value;
-        sendBLECmd(`REWIRE:${h}:${l}`);
-        logMsg("⚙️ Wiring updated!");
+        sendBLECmd(`REWIRE:${$('sel-high').value}:${$('sel-low').value}`); logMsg("⚙️ Wiring updated!");
+    }
+    window.resetStats = function() {
+        if(confirm("DANGER: Reset ALL relay counts to zero?")) { sendBLECmd("RESET_STATS"); for(let i=1;i<=6;i++) $(`s-r${i}`).innerText="0"; }
     }
 
-    // --- 3-WAY DELAY CONTROLS ---
+    // --- DELAY CONTROLS ---
     window.setDMode = function(type, mode) {
         if (!isBleConnected) return;
         if (type === 'D') {
-            if (mode === 0) sendBLECmd("D0.0");
-            else { sendBLECmd("RD:" + (mode === 2 ? "1" : "0")); sendBLECmd("D" + (dVal > 0 ? dVal : cacheD).toFixed(1)); }
+            if (mode === 0) sendBLECmd("D0.0"); else { sendBLECmd("RD:" + (mode===2?"1":"0")); sendBLECmd("D" + (dVal>0?dVal:cacheD).toFixed(1)); }
         } else {
-            if (mode === 0) sendBLECmd("DD0.0");
-            else { sendBLECmd("RDD:" + (mode === 2 ? "1" : "0")); sendBLECmd("DD" + (ddVal > 0 ? ddVal : cacheDD).toFixed(1)); }
+            if (mode === 0) sendBLECmd("DD0.0"); else { sendBLECmd("RDD:" + (mode===2?"1":"0")); sendBLECmd("DD" + (ddVal>0?ddVal:cacheDD).toFixed(1)); }
         }
     };
 
@@ -315,9 +310,9 @@
                     const ratio = audioContext.sampleRate / 16000; chunk16k = new Float32Array(Math.round(rawChunk.length / ratio));
                     for (let i = 0; i < chunk16k.length; i++) chunk16k[i] = rawChunk[Math.floor(i * ratio)];
                 }
-
                 let mean = 0; for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i]; mean /= chunk16k.length;
                 let hasAudioEnergy = false;
+
                 for (let i = 0; i < chunk16k.length; i++) {
                     let rawVal = chunk16k[i] - mean;
                     if (Math.abs(rawVal) > 0.02) hasAudioEnergy = true;
@@ -403,7 +398,7 @@
     window.setMode = function(mode, fromSync = false) {
         if (!isVoiceMode && !fromSync) {
             let cmd = '';
-            if      (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; } else if (mode==='D') { cmd='D1H'; hlStep=0; lastHouse='D'; } else if (mode==='DR') { cmd='D1L'; hlStep=0; lastHouse='DR'; }
+            if (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; } else if (mode==='D') { cmd='D1H'; hlStep=0; lastHouse='D'; } else if (mode==='DR') { cmd='D1L'; hlStep=0; lastHouse='DR'; }
             else if (mode==='HL') { lastHouse='HL'; cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; } else if (mode==='LH') { lastHouse='LH'; cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
             else if (mode==='T') {
                 if (lastHouse==='HL') { cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; } else if (lastHouse==='LH') { cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
@@ -421,9 +416,10 @@
     $('connectBtn').addEventListener('click', async () => {
         if (isBleConnected) { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); return; }
         try {
+            logMsg("Searching...");
             bleDev = await navigator.bluetooth.requestDevice({ filters:[{services:[SERVICE_UUID]}] });
             bleDev.addEventListener('gattserverdisconnected', () => {
-                isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; $('appTitle').innerText = "AI Puller V34";
+                isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; $('appTitle').innerText = "AI Puller V35"; logMsg("Disconnected.");
             });
             const server = await bleDev.gatt.connect(); const service = await server.getPrimaryService(SERVICE_UUID);
             rxChar = await service.getCharacteristic(CHAR_RX_UUID); txChar = await service.getCharacteristic(CHAR_TX_UUID);
@@ -432,16 +428,12 @@
                 let msg = new TextDecoder('utf-8').decode(e.target.value).trim();
                 if (!msg || msg.startsWith("Err:")) return;
 
-                // STATS RECEIVER
-                if (msg.startsWith("STATS:")) {
-                    let p = msg.split(":");
-                    let cts = p[1].split(",");
-                    let rts = p[2].split(",");
-                    
-                    for(let i=0; i<6; i++) $(`s-r${i+1}`).innerText = cts[i];
-                    $('sel-high').value = rts[0];
-                    $('sel-low').value = rts[1];
-                    return;
+                if (msg === "FETCHING...") { logMsg("📡 Fetching stats from Trap..."); return; }
+                if (msg.startsWith("ST1:")) { let pts = msg.substring(4).split(","); $('s-r1').innerText = pts[0]; $('s-r2').innerText = pts[1]; $('s-r3').innerText = pts[2]; return; }
+                if (msg.startsWith("ST2:")) {
+                    let p = msg.substring(4).split(":"); let cts = p[0].split(","); let rts = p[1].split(",");
+                    $('s-r4').innerText = cts[0]; $('s-r5').innerText = cts[1]; $('s-r6').innerText = cts[2];
+                    $('sel-high').value = rts[0]; $('sel-low').value = rts[1]; logMsg("✅ Relay Stats Updated!"); return;
                 }
 
                 if (msg.startsWith("MODE:")) {
@@ -470,7 +462,6 @@
                     if(dd) { ddVal=parseFloat(dd[1]); if(ddVal>0) cacheDD=ddVal; $('val-DD').innerText=ddVal.toFixed(1)+"s"; }
                     if(md) { muteDelay=parseInt(md[1]); }
                     if(fd) { fieldId=parseInt(fd[1]); $('field-display').innerText="Field: "+fieldId; }
-                    
                     if(rd) { isRandD = (rd[1]==='1'); } if(rdd) { isRandDD = (rdd[1]==='1'); }
                     updateDModeUI();
                 }
@@ -483,7 +474,7 @@
 
     async function processVoiceTrigger(level, isAi) {
         if (!armedMode || micState !== 0) return;
-        micState = 1; $('vol-bar').style.background = "#f00";
+        micState = 1; $('vol-bar').style.background = "#f00"; $('md-display').style.color = "#ff4444";
 
         let cmdToSend = '';
         if (armedMode === 'H' || armedMode === 'L') { cmdToSend = armedMode; window.cancelMode(false); }
@@ -501,17 +492,18 @@
 
         updateArmUI();
         let tLock = (dVal * 1000) + muteDelay;
+        logMsg(`💥 FIRED! Lockout: ${tLock}ms`);
         if (cmdToSend !== '') await sendBLECmd(cmdToSend);
 
         setTimeout(() => {
             micState = 2; audioDataBuffer = new Array(16000).fill(0);
-            $('vol-bar').style.background = "#f39c12"; 
+            $('vol-bar').style.background = "#f39c12"; $('md-display').style.color = "#aaa";
         }, tLock);
     }
 
     async function sendBLECmd(cmd, silent=false) {
         if (rxChar && isBleConnected) {
-            try { await rxChar.writeValue(new TextEncoder().encode(cmd)); } catch(e) {}
+            try { await rxChar.writeValue(new TextEncoder().encode(cmd)); if(!silent) logMsg("🚀 SENT: "+cmd); } catch(e) {}
         }
     }
 </script>
