@@ -1,9 +1,10 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V42</title>
+    <title>AI Skeet Puller V44</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="edge-impulse-standalone.js?v=42"></script>
+    <!-- Removed cache buster to ensure 100% offline loading from iPhone RAM -->
+    <script src="edge-impulse-standalone.js"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
         .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
@@ -41,7 +42,7 @@
         <div style="font-size: 24px; cursor: pointer;" onclick="promptAdmin()">⚙️</div>
     </div>
 
-    <h2 id="appTitle" style="margin-top:0;">AI Puller V42</h2>
+    <h2 id="appTitle" style="margin-top:0;">AI Puller V44</h2>
     
     <div class="row">
         <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
@@ -183,6 +184,7 @@
 
     $('threshSlider').oninput = function() { threshold = parseInt(this.value); $('threshVal').innerText = threshold; };
 
+    // --- ADMIN LOGIC ---
     window.promptAdmin = function() {
         let pin = prompt("Enter Maintenance PIN:");
         if (pin === "3368") { $('adminModal').style.display = 'flex'; if(isBleConnected) sendBLECmd("STATS", true); }
@@ -207,6 +209,7 @@
         logMsg("⚙️ Wiring updated!");
     }
 
+    // --- 3-WAY DELAY CONTROLS ---
     window.setDMode = function(type, mode) {
         if (!isBleConnected) return;
         if (type === 'D') {
@@ -285,15 +288,23 @@
         let attempts = 0;
         let checkReady = setInterval(async () => {
             attempts++;
-            if (window.Module && typeof window.Module.run_classifier === 'function') {
+            try {
+                if (window.Module && typeof window.Module.run_classifier === 'function') {
+                    clearInterval(checkReady);
+                    eiClassifier = new EdgeImpulseClassifier();
+                    await eiClassifier.init();
+                    classifierReady = true;
+                    $('ai-confidence').innerText = "AI Confidence: Listening...";
+                    logMsg("✅ AI Engine Ready!");
+                } else if (attempts > 50) { 
+                    clearInterval(checkReady);
+                    $('ai-confidence').innerText = "AI Failed - Volume Mode Active";
+                    logMsg("❌ AI Engine Timeout.");
+                }
+            } catch(e) {
                 clearInterval(checkReady);
-                eiClassifier = new EdgeImpulseClassifier();
-                await eiClassifier.init();
-                classifierReady = true;
-                $('ai-confidence').innerText = "AI Confidence: Listening...";
-            } else if (attempts > 50) { 
-                clearInterval(checkReady);
-                $('ai-confidence').innerText = "AI Failed - Volume Mode Active";
+                $('ai-confidence').innerText = "AI Error - Volume Mode";
+                logMsg("❌ AI Check Error: " + e);
             }
         }, 100);
     }
@@ -323,6 +334,7 @@
         }
     }
 
+    // --- MIC PIPELINE ---
     async function startMic() {
         try {
             audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -391,7 +403,7 @@
                 animId = requestAnimationFrame(checkVolume);
             }
             checkVolume();
-        } catch (err) { stopMic(true); }
+        } catch (err) { logMsg("Mic Error: " + err); stopMic(true); }
     }
 
     function stopMic(resetUI = true) {
@@ -508,15 +520,14 @@
         if (!fromSync&&isBleConnected&&isSyncEnabled&&isVoiceMode) sendBLECmd(armedMode?"MODE:"+armedMode+":"+lastHouse:"MODE:CANCEL", true);
     };
 
-    // FIX: Show all devices so Bluefy doesn't hide named devices
     $('connectBtn').addEventListener('click', async () => {
         if (isBleConnected) { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); return; }
         try {
             logMsg("Searching...");
-            bleDev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices:[SERVICE_UUID] });
+            bleDev = await navigator.bluetooth.requestDevice({ filters:[{services:[SERVICE_UUID]}] });
             bleDev.addEventListener('gattserverdisconnected', () => {
                 isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; 
-                $('appTitle').innerText = "AI Puller V42"; logMsg("Disconnected.");
+                $('appTitle').innerText = "AI Puller V44"; logMsg("Disconnected.");
             });
             const server = await bleDev.gatt.connect(); const service = await server.getPrimaryService(SERVICE_UUID);
             rxChar = await service.getCharacteristic(CHAR_RX_UUID); txChar = await service.getCharacteristic(CHAR_TX_UUID);
@@ -580,7 +591,7 @@
             isBleConnected = true;
             $('connectBtn').innerText = "Disconnect BLE"; $('connectBtn').style.background = "#dc3545";
             setTimeout(()=>sendBLECmd("?"),500);
-        } catch(e) { logMsg("BLE Error: " + e); }
+        } catch(e) { logMsg("BLE Error: " + e.message); }
     });
 
     async function processVoiceTrigger(level, isAi) {
@@ -611,4 +622,16 @@
         if (cmdToSend !== '') await sendBLECmd(cmdToSend);
 
         setTimeout(() => {
-            micState = 2;
+            micState = 2; audioDataBuffer = new Array(16000).fill(0);
+            $('vol-bar').style.background = "#f39c12"; $('md-display').style.color = "#aaa";
+        }, tLock);
+    }
+
+    async function sendBLECmd(cmd, silent=false) {
+        if (rxChar && isBleConnected) {
+            try { await rxChar.writeValue(new TextEncoder().encode(cmd)); if(!silent) logMsg("🚀 SENT: "+cmd); } catch(e) {}
+        }
+    }
+</script>
+</body>
+</html>
