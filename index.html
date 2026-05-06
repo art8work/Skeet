@@ -389,22 +389,28 @@
                 }
             };
 
-            function checkVolume() {
+function checkVolume() {
                 if (!isMicActive) return;
                 analyser.getByteFrequencyData(freqData);
                 let sum = 0; for(let i=0; i<freqData.length; i++) sum += freqData[i];
                 let avgVol = sum / freqData.length;
                 $('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
 
+                // VOLUME FALLBACK (Triggers only if AI is OFF)
                 if (!classifierReady || !isAiEnabled) {
-                    if (micState === 0 && avgVol > threshold && isVoiceMode) processVoiceTrigger(avgVol, false);
-                    else if (micState === 2 && avgVol < (threshold * 0.8)) { micState = 0; $('vol-bar').style.background = "#0f0"; }
+                    if (micState === 0 && avgVol > threshold && isVoiceMode) {
+                        processVoiceTrigger(avgVol, false);
+                    }
                 }
+
+                // UNIVERSAL RESET (Runs for BOTH AI and Volume modes)
+                if (micState === 2 && avgVol < (threshold * 0.8)) { 
+                    micState = 0; 
+                    $('vol-bar').style.background = "#0f0"; 
+                }
+                
                 animId = requestAnimationFrame(checkVolume);
             }
-            checkVolume();
-        } catch (err) { logMsg("Mic Error: " + err); stopMic(true); }
-    }
 
     function stopMic(resetUI = true) {
         if (aiProcessor) { aiProcessor.disconnect(); aiProcessor = null; }
