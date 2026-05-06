@@ -599,4 +599,36 @@
         if (armedMode === 'H' || armedMode === 'L') { cmdToSend = armedMode; window.cancelMode(false); }
         else if (armedMode === 'D')  { cmdToSend = 'D1H'; window.cancelMode(false); }
         else if (armedMode === 'DR') { cmdToSend = 'D1L'; window.cancelMode(false); }
-        else if (armedMode === 'HL') { if (hlStep === 0) { cmdToSend = 'H'; hlStep = 1; $('arm-status').innerText = "ARMED: Now Pulling Low"; } else { cmdToSend = 'L'; hlStep = 0; window.cancelMode(false);
+        else if (armedMode === 'HL') { if (hlStep === 0) { cmdToSend = 'H'; hlStep = 1; $('arm-status').innerText = "ARMED: Now Pulling Low"; } else { cmdToSend = 'L'; hlStep = 0; window.cancelMode(false); } }
+        else if (armedMode === 'LH') { if (hlStep === 0) { cmdToSend = 'L'; hlStep = 1; $('arm-status').innerText = "ARMED: Now Pulling High"; } else { cmdToSend = 'H'; hlStep = 0; window.cancelMode(false); } }
+        else if (armedMode === 'T')  {
+            if (lastHouse === 'HL') { cmdToSend = (hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+            else if (lastHouse === 'LH') { cmdToSend = (hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
+            else if (lastHouse === 'D')  cmdToSend = 'D1H';
+            else if (lastHouse === 'DR') cmdToSend = 'D1L';
+            else cmdToSend = lastHouse;
+        }
+
+        updateArmUI();
+        let tLock = (dVal * 1000) + muteDelay;
+        if (cmdToSend === 'D1H' || cmdToSend === 'D1L') {
+            tLock += (ddVal * 1000);
+        }
+
+        logMsg(`💥 FIRED! (${isAi?'AI ':'Vol '}${Math.round(level)}%) Lockout: ${tLock}ms`);
+        if (cmdToSend !== '') await sendBLECmd(cmdToSend);
+
+        setTimeout(() => {
+            micState = 2; audioDataBuffer = new Array(16000).fill(0);
+            $('vol-bar').style.background = "#f39c12"; $('md-display').style.color = "#aaa";
+        }, tLock);
+    }
+
+    async function sendBLECmd(cmd, silent=false) {
+        if (rxChar && isBleConnected) {
+            try { await rxChar.writeValue(new TextEncoder().encode(cmd)); if(!silent) logMsg("🚀 SENT: "+cmd); } catch(e) {}
+        }
+    }
+</script>
+</body>
+</html>
