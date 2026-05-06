@@ -3,8 +3,7 @@
 <head>
     <title>AI Skeet Puller V45</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!-- Removed cache buster to ensure 100% offline loading from iPhone RAM -->
-    <script src="edge-impulse-standalone.js"></script>
+    <script src="edge-impulse-standalone.js?v=45"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
         .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
@@ -42,7 +41,7 @@
         <div style="font-size: 24px; cursor: pointer;" onclick="promptAdmin()">⚙️</div>
     </div>
 
-    <h2 id="appTitle" style="margin-top:0;">AI Puller V44</h2>
+    <h2 id="appTitle" style="margin-top:0;">AI Puller V45</h2>
     
     <div class="row">
         <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
@@ -288,23 +287,15 @@
         let attempts = 0;
         let checkReady = setInterval(async () => {
             attempts++;
-            try {
-                if (window.Module && typeof window.Module.run_classifier === 'function') {
-                    clearInterval(checkReady);
-                    eiClassifier = new EdgeImpulseClassifier();
-                    await eiClassifier.init();
-                    classifierReady = true;
-                    $('ai-confidence').innerText = "AI Confidence: Listening...";
-                    logMsg("✅ AI Engine Ready!");
-                } else if (attempts > 50) { 
-                    clearInterval(checkReady);
-                    $('ai-confidence').innerText = "AI Failed - Volume Mode Active";
-                    logMsg("❌ AI Engine Timeout.");
-                }
-            } catch(e) {
+            if (window.Module && typeof window.Module.run_classifier === 'function') {
                 clearInterval(checkReady);
-                $('ai-confidence').innerText = "AI Error - Volume Mode";
-                logMsg("❌ AI Check Error: " + e);
+                eiClassifier = new EdgeImpulseClassifier();
+                await eiClassifier.init();
+                classifierReady = true;
+                $('ai-confidence').innerText = "AI Confidence: Listening...";
+            } else if (attempts > 50) { 
+                clearInterval(checkReady);
+                $('ai-confidence').innerText = "AI Failed - Volume Mode Active";
             }
         }, 100);
     }
@@ -329,9 +320,8 @@
 
         if (pullScore >= triggerLevel && isVoiceMode) {
             if (micState === 0 && armedMode) processVoiceTrigger(pct, true);
-        } else if (micState === 2 && pullScore < (triggerLevel * 0.5)) {
-            micState = 0; $('vol-bar').style.background = "#0f0";
         }
+        // AI State Reset logic moved strictly to volume check for bulletproof fallback
     }
 
     // --- MIC PIPELINE ---
@@ -389,7 +379,7 @@
                 }
             };
 
-function checkVolume() {
+            function checkVolume() {
                 if (!isMicActive) return;
                 analyser.getByteFrequencyData(freqData);
                 let sum = 0; for(let i=0; i<freqData.length; i++) sum += freqData[i];
@@ -408,9 +398,12 @@ function checkVolume() {
                     micState = 0; 
                     $('vol-bar').style.background = "#0f0"; 
                 }
-                
+
                 animId = requestAnimationFrame(checkVolume);
             }
+            checkVolume();
+        } catch (err) { stopMic(true); }
+    }
 
     function stopMic(resetUI = true) {
         if (aiProcessor) { aiProcessor.disconnect(); aiProcessor = null; }
@@ -526,14 +519,18 @@ function checkVolume() {
         if (!fromSync&&isBleConnected&&isSyncEnabled&&isVoiceMode) sendBLECmd(armedMode?"MODE:"+armedMode+":"+lastHouse:"MODE:CANCEL", true);
     };
 
+    // BLE Connect -> Bypass Bluefy filtering limitation by accepting all devices
     $('connectBtn').addEventListener('click', async () => {
         if (isBleConnected) { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); return; }
         try {
             logMsg("Searching...");
-            bleDev = await navigator.bluetooth.requestDevice({ filters:[{services:[SERVICE_UUID]}] });
+            bleDev = await navigator.bluetooth.requestDevice({ 
+                acceptAllDevices: true, 
+                optionalServices:[SERVICE_UUID] 
+            });
             bleDev.addEventListener('gattserverdisconnected', () => {
                 isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; 
-                $('appTitle').innerText = "AI Puller V44"; logMsg("Disconnected.");
+                $('appTitle').innerText = "AI Puller V45"; logMsg("Disconnected.");
             });
             const server = await bleDev.gatt.connect(); const service = await server.getPrimaryService(SERVICE_UUID);
             rxChar = await service.getCharacteristic(CHAR_RX_UUID); txChar = await service.getCharacteristic(CHAR_TX_UUID);
@@ -597,7 +594,7 @@ function checkVolume() {
             isBleConnected = true;
             $('connectBtn').innerText = "Disconnect BLE"; $('connectBtn').style.background = "#dc3545";
             setTimeout(()=>sendBLECmd("?"),500);
-        } catch(e) { logMsg("BLE Error: " + e.message); }
+        } catch(e) { logMsg("BLE Error: " + e); }
     });
 
     async function processVoiceTrigger(level, isAi) {
