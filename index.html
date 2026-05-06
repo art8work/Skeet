@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V38</title>
+    <title>AI Skeet Puller V39</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="edge-impulse-standalone.js?v=38"></script>
+    <script src="edge-impulse-standalone.js?v=39"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
         .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
@@ -41,7 +41,7 @@
         <div style="font-size: 24px; cursor: pointer;" onclick="promptAdmin()">⚙️</div>
     </div>
 
-    <h2 id="appTitle" style="margin-top:0;">AI Puller V38</h2>
+    <h2 id="appTitle" style="margin-top:0;">AI Puller V39</h2>
     
     <div class="row">
         <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
@@ -107,7 +107,7 @@
     <label>Trigger Sensitivity / AI %: <b id="threshVal" style="color:#ffeb3b;">40</b></label><br>
     <input type="range" id="threshSlider" min="5" max="95" value="40" style="width:80%; margin-top:5px;">
 
-    <div id="md-display" style="color:#aaa; font-weight:bold; margin-top:8px;">Mute Delay: 500ms</div>
+    <div id="md-display" style="color:#aaa; font-weight:bold; margin-top:8px; transition: color 0.2s;">Mute Delay (MD): 500ms</div>
     <div id="log">--- Debug Log ---<br></div>
 
     <!-- ADMIN MODAL -->
@@ -176,7 +176,7 @@
     let isAiEnabled = true, classifierReady = false, threshold = 40;
     let isSyncEnabled = true, isVoiceMode = true;
     let armedMode = null, hlStep = 0, lastHouse = 'H';
-    let dVal = 0.0, ddVal = 0.0, muteDelay = 500, fieldId = 1, isSwap = false;
+    let dVal = 0.0, ddVal = 0.0, muteDelay = 500, fieldId = 1;
     let cacheD = 1.5, isRandD = false, cacheDD = 1.5, isRandDD = false;
 
     function logMsg(msg) { $('log').innerHTML = msg + "<br>" + $('log').innerHTML; }
@@ -518,7 +518,7 @@
             bleDev = await navigator.bluetooth.requestDevice({ filters:[{services:[SERVICE_UUID]}] });
             bleDev.addEventListener('gattserverdisconnected', () => {
                 isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; 
-                $('appTitle').innerText = "AI Puller V38"; logMsg("Disconnected.");
+                $('appTitle').innerText = "AI Puller V39"; logMsg("Disconnected.");
             });
             const server = await bleDev.gatt.connect(); const service = await server.getPrimaryService(SERVICE_UUID);
             rxChar = await service.getCharacteristic(CHAR_RX_UUID); txChar = await service.getCharacteristic(CHAR_TX_UUID);
@@ -528,12 +528,15 @@
                 let msg = new TextDecoder('utf-8').decode(e.target.value).trim();
                 if (!msg || msg.startsWith("Err:")) return;
 
-                if (msg === "FETCHING...") { logMsg("📡 Fetching stats from Trap House..."); return; }
-                if (msg.startsWith("ST1:")) { let pts = msg.substring(4).split(","); $('s-r1').innerText = pts[0]; $('s-r2').innerText = pts[1]; $('s-r3').innerText = pts[2]; return; }
-                if (msg.startsWith("ST2:")) {
-                    let p = msg.substring(4).split(":"); let cts = p[0].split(","); let rts = p[1].split(",");
-                    $('s-r4').innerText = cts[0]; $('s-r5').innerText = cts[1]; $('s-r6').innerText = cts[2];
-                    $('sel-high').value = rts[0]; $('sel-low').value = rts[1]; logMsg("✅ Relay Stats Updated!"); return;
+                if (msg === "FETCHING...") { logMsg("📡 Fetching stats from Trap..."); return; }
+                if (msg.startsWith("S1:")) { let pts = msg.substring(3).split(","); $('s-r1').innerText = pts[0]; $('s-r2').innerText = pts[1]; return; }
+                if (msg.startsWith("S2:")) { let pts = msg.substring(3).split(","); $('s-r3').innerText = pts[0]; $('s-r4').innerText = pts[1]; return; }
+                if (msg.startsWith("S3:")) { let pts = msg.substring(3).split(","); $('s-r5').innerText = pts[0]; $('s-r6').innerText = pts[1]; return; }
+                if (msg.startsWith("S4:")) { 
+                    let pts = msg.substring(3).split(","); 
+                    $('sel-high').value = pts[0]; $('sel-low').value = pts[1]; 
+                    logMsg("✅ Stats Updated!"); 
+                    return; 
                 }
 
                 if (msg.startsWith("MODE:")) {
@@ -549,31 +552,21 @@
                 
                 if (msg.startsWith("RD SET:")) { isRandD = msg.includes("1"); updateDModeUI(); }
                 if (msg.startsWith("RDD SET:")) { isRandDD = msg.includes("1"); updateDModeUI(); }
-                if (msg.startsWith("SWAP SET:")) { 
-                    isSwap = msg.includes("1"); 
-                    $('btn-swap').innerText = isSwap ? "Swap Relays (H/L): ON" : "Swap Relays (H/L): OFF";
-                    $('btn-swap').style.background = isSwap ? "#e74c3c" : "#6c757d";
-                }
 
-                if (msg.includes("Delay Set:")) { let match = msg.match(/Delay Set: ([\d\.]+)/); if (match) { dVal = parseFloat(match[1]); if(dVal>0) cacheD=dVal; $('val-D').innerText = dVal.toFixed(1)+"s"; updateDModeUI(); } }
-                if (msg.includes("Dbl Dly Set:")) { let match = msg.match(/Dbl Dly Set: ([\d\.]+)/); if (match) { ddVal = parseFloat(match[1]); if(ddVal>0) cacheDD=ddVal; $('val-DD').innerText = ddVal.toFixed(1)+"s"; updateDModeUI(); } }
-                if (msg.includes("MD Set:")) { let match = msg.match(/MD Set: (\d+)/); if (match) { muteDelay = parseInt(match[1]); } }
+                if (msg.includes("Delay Set:")) { let m = msg.match(/Delay Set: ([\d\.]+)/); if (m) { dVal = parseFloat(m[1]); if(dVal>0) cacheD=dVal; $('val-D').innerText = dVal.toFixed(1)+"s"; updateDModeUI(); } }
+                if (msg.includes("Dbl Dly Set:")) { let m = msg.match(/Dbl Dly Set: ([\d\.]+)/); if (m) { ddVal = parseFloat(m[1]); if(ddVal>0) cacheDD=ddVal; $('val-DD').innerText = ddVal.toFixed(1)+"s"; updateDModeUI(); } }
+                if (msg.includes("MD Set:")) { let m = msg.match(/MD Set: (\d+)/); if (m) { muteDelay = parseInt(m[1]); } }
                 if (msg.includes("Field Set:")) { let m=msg.match(/Field Set: (\d+)/); if(m){ fieldId=parseInt(m[1]); $('field-display').innerText="Field: "+fieldId; } }
 
                 if (msg.includes("STATUS:")) {
                     let d=msg.match(/Delay: ([\d.]+)/), dd=msg.match(/Dbl: ([\d.]+)/), md=msg.match(/MD: (\d+)/), fd=msg.match(/Field: (\d+)/);
-                    let rd=msg.match(/RD: (\d)/), rdd=msg.match(/RDD: (\d)/), swp=msg.match(/SWAP: (\d)/);
+                    let rd=msg.match(/RD: (\d)/), rdd=msg.match(/RDD: (\d)/);
                     if(d) { dVal=parseFloat(d[1]); if(dVal>0) cacheD=dVal; $('val-D').innerText=dVal.toFixed(1)+"s"; }
                     if(dd) { ddVal=parseFloat(dd[1]); if(ddVal>0) cacheDD=ddVal; $('val-DD').innerText=ddVal.toFixed(1)+"s"; }
                     if(md) { muteDelay=parseInt(md[1]); }
                     if(fd) { fieldId=parseInt(fd[1]); $('field-display').innerText="Field: "+fieldId; }
                     
                     if(rd) { isRandD = (rd[1]==='1'); } if(rdd) { isRandDD = (rdd[1]==='1'); }
-                    if(swp) { 
-                        isSwap = (swp[1]==='1'); 
-                        $('btn-swap').innerText = isSwap ? "Swap Relays (H/L): ON" : "Swap Relays (H/L): OFF";
-                        $('btn-swap').style.background = isSwap ? "#e74c3c" : "#6c757d";
-                    }
                     updateDModeUI();
                 }
             });
@@ -603,7 +596,7 @@
 
         updateArmUI();
         let tLock = (dVal * 1000) + muteDelay;
-        logMsg(`💥 FIRED! Lockout: ${tLock}ms`);
+        logMsg(`💥 FIRED! (${isAi?'AI ':'Vol '}${Math.round(level)}%) Lockout: ${tLock}ms`);
         if (cmdToSend !== '') await sendBLECmd(cmdToSend);
 
         setTimeout(() => {
