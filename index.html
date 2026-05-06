@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V43</title>
+    <title>AI Skeet Puller V42</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="edge-impulse-standalone.js?v=43"></script>
+    <script src="edge-impulse-standalone.js?v=42"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
         .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
@@ -41,7 +41,7 @@
         <div style="font-size: 24px; cursor: pointer;" onclick="promptAdmin()">⚙️</div>
     </div>
 
-    <h2 id="appTitle" style="margin-top:0;">AI Puller V43</h2>
+    <h2 id="appTitle" style="margin-top:0;">AI Puller V42</h2>
     
     <div class="row">
         <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
@@ -183,7 +183,6 @@
 
     $('threshSlider').oninput = function() { threshold = parseInt(this.value); $('threshVal').innerText = threshold; };
 
-    // --- ADMIN LOGIC ---
     window.promptAdmin = function() {
         let pin = prompt("Enter Maintenance PIN:");
         if (pin === "3368") { $('adminModal').style.display = 'flex'; if(isBleConnected) sendBLECmd("STATS", true); }
@@ -208,7 +207,6 @@
         logMsg("⚙️ Wiring updated!");
     }
 
-    // --- 3-WAY DELAY CONTROLS ---
     window.setDMode = function(type, mode) {
         if (!isBleConnected) return;
         if (type === 'D') {
@@ -318,13 +316,13 @@
         $('ai-confidence').innerText = "AI Confidence: " + pct + "%";
         $('ai-confidence').style.color = (pullScore >= triggerLevel) ? "#f00" : "#0f0";
 
-        // V43 FIX: AI only triggers if micState is 0 (Ready). Quiet detection moved to physical volume check.
-        if (micState === 0 && pullScore >= triggerLevel && isVoiceMode && armedMode) {
-            processVoiceTrigger(pct, true);
-        } 
+        if (pullScore >= triggerLevel && isVoiceMode) {
+            if (micState === 0 && armedMode) processVoiceTrigger(pct, true);
+        } else if (micState === 2 && pullScore < (triggerLevel * 0.5)) {
+            micState = 0; $('vol-bar').style.background = "#0f0";
+        }
     }
 
-    // --- MIC PIPELINE ---
     async function startMic() {
         try {
             audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -363,7 +361,7 @@
                     let rawVal = chunk16k[i] - mean;
                     if (Math.abs(rawVal) > 0.02) hasAudioEnergy = true;
 
-                    if (micState !== 1) { // Freeze buffer during lockout (Red Bar)
+                    if (micState !== 1) {
                         let aiVal = rawVal * 32768.0 * 2.0; 
                         if (aiVal > 32767) aiVal = 32767; if (aiVal < -32768) aiVal = -32768;
                         audioDataBuffer.push(aiVal);
@@ -374,7 +372,6 @@
                     audioDataBuffer = audioDataBuffer.slice(audioDataBuffer.length - 16000);
                 }
 
-                // AI only runs when Mic is READY (Stage 0) and hears actual sound
                 if (micState === 0 && audioDataBuffer.length === 16000 && hasAudioEnergy) {
                     runAiInference(new Float32Array(audioDataBuffer));
                 }
@@ -387,18 +384,10 @@
                 let avgVol = sum / freqData.length;
                 $('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
 
-                // V43 FIX 1: AI OFF Volume Fallback Trigger
                 if (!classifierReady || !isAiEnabled) {
                     if (micState === 0 && avgVol > threshold && isVoiceMode) processVoiceTrigger(avgVol, false);
+                    else if (micState === 2 && avgVol < (threshold * 0.8)) { micState = 0; $('vol-bar').style.background = "#0f0"; }
                 }
-
-                // V43 FIX 2: UNIVERSAL "WAIT FOR QUIET" RESET (Works for both AI and Vol mode)
-                if (micState === 2 && avgVol < (threshold * 0.8)) { 
-                    micState = 0; 
-                    $('vol-bar').style.background = "#0f0"; 
-                    logMsg("Quiet detected. Ready.");
-                }
-
                 animId = requestAnimationFrame(checkVolume);
             }
             checkVolume();
@@ -519,14 +508,15 @@
         if (!fromSync&&isBleConnected&&isSyncEnabled&&isVoiceMode) sendBLECmd(armedMode?"MODE:"+armedMode+":"+lastHouse:"MODE:CANCEL", true);
     };
 
+    // FIX: Show all devices so Bluefy doesn't hide named devices
     $('connectBtn').addEventListener('click', async () => {
         if (isBleConnected) { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); return; }
         try {
             logMsg("Searching...");
-            bleDev = await navigator.bluetooth.requestDevice({ filters:[{services:[SERVICE_UUID]}] });
+            bleDev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices:[SERVICE_UUID] });
             bleDev.addEventListener('gattserverdisconnected', () => {
                 isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; 
-                $('appTitle').innerText = "AI Puller V43"; logMsg("Disconnected.");
+                $('appTitle').innerText = "AI Puller V42"; logMsg("Disconnected.");
             });
             const server = await bleDev.gatt.connect(); const service = await server.getPrimaryService(SERVICE_UUID);
             rxChar = await service.getCharacteristic(CHAR_RX_UUID); txChar = await service.getCharacteristic(CHAR_TX_UUID);
@@ -537,11 +527,13 @@
                 if (!msg || msg.startsWith("Err:")) return;
 
                 if (msg === "FETCHING...") { logMsg("📡 Fetching stats from Trap..."); return; }
-                if (msg.startsWith("ST1:")) { let pts = msg.substring(4).split(","); $('s-r1').innerText = pts[0]; $('s-r2').innerText = pts[1]; $('s-r3').innerText = pts[2]; return; }
-                if (msg.startsWith("ST2:")) {
-                    let p = msg.substring(4).split(":"); let cts = p[0].split(","); let rts = p[1].split(",");
-                    $('s-r4').innerText = cts[0]; $('s-r5').innerText = cts[1]; $('s-r6').innerText = cts[2];
-                    $('sel-high').value = rts[0]; $('sel-low').value = rts[1]; logMsg("✅ Relay Stats Updated!"); return;
+                if (msg.startsWith("S1:")) { let pts = msg.substring(3).split(","); $('s-r1').innerText = pts[0]; $('s-r2').innerText = pts[1]; return; }
+                if (msg.startsWith("S2:")) { let pts = msg.substring(3).split(","); $('s-r3').innerText = pts[0]; $('s-r4').innerText = pts[1]; return; }
+                if (msg.startsWith("S3:")) { let pts = msg.substring(3).split(","); $('s-r5').innerText = pts[0]; $('s-r6').innerText = pts[1]; return; }
+                if (msg.startsWith("S4:")) { 
+                    let pts = msg.substring(3).split(","); 
+                    $('sel-high').value = pts[0]; $('sel-low').value = pts[1]; 
+                    logMsg("✅ Relay Stats Updated!"); return; 
                 }
 
                 if (msg.startsWith("MODE:")) {
@@ -588,7 +580,7 @@
             isBleConnected = true;
             $('connectBtn').innerText = "Disconnect BLE"; $('connectBtn').style.background = "#dc3545";
             setTimeout(()=>sendBLECmd("?"),500);
-        } catch(e) {}
+        } catch(e) { logMsg("BLE Error: " + e); }
     });
 
     async function processVoiceTrigger(level, isAi) {
@@ -619,16 +611,4 @@
         if (cmdToSend !== '') await sendBLECmd(cmdToSend);
 
         setTimeout(() => {
-            micState = 2; audioDataBuffer = new Array(16000).fill(0);
-            $('vol-bar').style.background = "#f39c12"; $('md-display').style.color = "#aaa";
-        }, tLock);
-    }
-
-    async function sendBLECmd(cmd, silent=false) {
-        if (rxChar && isBleConnected) {
-            try { await rxChar.writeValue(new TextEncoder().encode(cmd)); if(!silent) logMsg("🚀 SENT: "+cmd); } catch(e) {}
-        }
-    }
-</script>
-</body>
-</html>
+            micState = 2;
