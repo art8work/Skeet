@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V35</title>
+    <title>AI Skeet Puller V36</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="edge-impulse-standalone.js?v=35"></script>
+    <script src="edge-impulse-standalone.js?v=36"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
         .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
@@ -41,7 +41,7 @@
         <div style="font-size: 24px; cursor: pointer;" onclick="promptAdmin()">⚙️</div>
     </div>
 
-    <h2 id="appTitle" style="margin-top:0;">AI Puller V35</h2>
+    <h2 id="appTitle" style="margin-top:0;">AI Puller V36</h2>
     
     <div class="row">
         <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
@@ -157,20 +157,21 @@
             </div>
             <button style="background:#28A745; width:100%; margin-top:10px; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="saveWiring()">Save Wiring</button>
 
-            <hr style="border-color:#555; margin: 15px 0;">
-            <button style="background:#8b0000; width:100%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white; margin-bottom: 10px;" onclick="resetStats()">DANGER: Reset Stats</button>
-
+            <br><br>
             <button style="background:#888; width:100%; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="document.getElementById('adminModal').style.display='none'">Close</button>
         </div>
     </div>
 
 <script>
     const $ = id => document.getElementById(id);
-    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e", CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e", CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
+    const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+    const CHAR_RX_UUID = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+    const CHAR_TX_UUID = "6e400003-b5a3-f393-e0a9-e50e24dcca9e";
     
     let bleDev, rxChar, txChar, isBleConnected = false;
     let micState = 0, isMicActive = false, wasMicActiveBeforeSleep = false;
-    let audioContext, audioStream, animId, aiProcessor, audioDataBuffer = new Array(16000).fill(0); 
+    let audioContext, audioStream, animId, aiProcessor;
+    let audioDataBuffer = new Array(16000).fill(0); 
     
     let isAiEnabled = true, classifierReady = false, threshold = 40;
     let isSyncEnabled = true, isVoiceMode = true;
@@ -194,39 +195,54 @@
         let fId = $('newFieldInput').value;
         if (fId) sendBLECmd("FIELD:" + fId);
         if (nName !== "") {
-            sendBLECmd("NAME:" + nName); $('adminModal').style.display = 'none';
+            sendBLECmd("NAME:" + nName);
+            $('adminModal').style.display = 'none';
             setTimeout(() => { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); }, 500);
         }
     }
     window.saveWiring = function() {
         if (!isBleConnected) return;
-        sendBLECmd(`REWIRE:${$('sel-high').value}:${$('sel-low').value}`); logMsg("⚙️ Wiring updated!");
-    }
-    window.resetStats = function() {
-        if(confirm("DANGER: Reset ALL relay counts to zero?")) { sendBLECmd("RESET_STATS"); for(let i=1;i<=6;i++) $(`s-r${i}`).innerText="0"; }
+        let h = $('sel-high').value;
+        let l = $('sel-low').value;
+        sendBLECmd(`REWIRE:${h}:${l}`);
+        logMsg("⚙️ Wiring updated!");
     }
 
-    // --- DELAY CONTROLS ---
+    // --- 3-WAY DELAY CONTROLS ---
     window.setDMode = function(type, mode) {
         if (!isBleConnected) return;
         if (type === 'D') {
-            if (mode === 0) sendBLECmd("D0.0"); else { sendBLECmd("RD:" + (mode===2?"1":"0")); sendBLECmd("D" + (dVal>0?dVal:cacheD).toFixed(1)); }
+            if (mode === 0) sendBLECmd("D0.0");
+            else { sendBLECmd("RD:" + (mode === 2 ? "1" : "0")); sendBLECmd("D" + (dVal > 0 ? dVal : cacheD).toFixed(1)); }
         } else {
-            if (mode === 0) sendBLECmd("DD0.0"); else { sendBLECmd("RDD:" + (mode===2?"1":"0")); sendBLECmd("DD" + (ddVal>0?ddVal:cacheDD).toFixed(1)); }
+            if (mode === 0) sendBLECmd("DD0.0");
+            else { sendBLECmd("RDD:" + (mode === 2 ? "1" : "0")); sendBLECmd("DD" + (ddVal > 0 ? ddVal : cacheDD).toFixed(1)); }
         }
     };
 
     window.adjDelay = function(type, amt) {
         if (!isBleConnected) return;
-        if (type === 'D') { let n = Math.max(0, dVal + amt); if (dVal > 0) cacheD = n; if (dVal > 0) sendBLECmd("D" + n.toFixed(1)); } 
-        else { let n = Math.max(0, ddVal + amt); if (ddVal > 0) cacheDD = n; if (ddVal > 0) sendBLECmd("DD" + n.toFixed(1)); }
+        if (type === 'D') { 
+            let nextVal = Math.max(0, dVal + amt);
+            if (dVal > 0) cacheD = nextVal; 
+            if (dVal > 0) sendBLECmd("D" + nextVal.toFixed(1)); 
+        } else { 
+            let nextVal = Math.max(0, ddVal + amt);
+            if (ddVal > 0) cacheDD = nextVal; 
+            if (ddVal > 0) sendBLECmd("DD" + nextVal.toFixed(1)); 
+        }
     };
 
     function updateDModeUI() {
         let mD = (dVal === 0) ? 0 : (isRandD ? 2 : 1);
-        $('mode-D-0').className = "seg-btn " + (mD===0 ? "active off" : ""); $('mode-D-1').className = "seg-btn " + (mD===1 ? "active on" : ""); $('mode-D-2').className = "seg-btn " + (mD===2 ? "active rdm" : "");
+        $('mode-D-0').className = "seg-btn " + (mD===0 ? "active off" : "");
+        $('mode-D-1').className = "seg-btn " + (mD===1 ? "active on" : "");
+        $('mode-D-2').className = "seg-btn " + (mD===2 ? "active rdm" : "");
+
         let mDD = (ddVal === 0) ? 0 : (isRandDD ? 2 : 1);
-        $('mode-DD-0').className = "seg-btn " + (mDD===0 ? "active off" : ""); $('mode-DD-1').className = "seg-btn " + (mDD===1 ? "active on" : ""); $('mode-DD-2').className = "seg-btn " + (mDD===2 ? "active rdm" : "");
+        $('mode-DD-0').className = "seg-btn " + (mDD===0 ? "active off" : "");
+        $('mode-DD-1').className = "seg-btn " + (mDD===1 ? "active on" : "");
+        $('mode-DD-2').className = "seg-btn " + (mDD===2 ? "active rdm" : "");
     }
 
     // --- EDGE IMPULSE ---
@@ -235,24 +251,36 @@
         _initialized = false;
         init() {
             return new Promise((resolve) => {
-                if (window.Module && typeof window.Module.run_classifier === 'function') { this._initialized = true; resolve(); return; }
-                const prev = window.Module ? window.Module.onRuntimeInitialized : null; window.Module = window.Module || {};
-                window.Module.onRuntimeInitialized = () => { if (typeof prev === 'function') prev(); this._initialized = true; resolve(); };
+                if (window.Module && typeof window.Module.run_classifier === 'function') {
+                    this._initialized = true; resolve(); return;
+                }
+                const prev = window.Module ? window.Module.onRuntimeInitialized : null;
+                window.Module = window.Module || {};
+                window.Module.onRuntimeInitialized = () => {
+                    if (typeof prev === 'function') prev();
+                    this._initialized = true; resolve();
+                };
             });
         }
         classify(rawData) {
             if (!this._initialized) throw new Error('Not initialized');
-            const ptr = Module._malloc(rawData.length * 4); Module.HEAPF32.set(rawData, ptr >> 2);
-            let ret = Module.run_classifier(ptr, rawData.length, false); Module._free(ptr);
-            if (ret.result !== 0) return null; let out =[];
+            const ptr = Module._malloc(rawData.length * 4);
+            Module.HEAPF32.set(rawData, ptr >> 2);
+            let ret = Module.run_classifier(ptr, rawData.length, false);
+            Module._free(ptr);
+            if (ret.result !== 0) return null;
+            let out =[];
             for (let i = 0; i < ret.size(); i++) { let c = ret.get(i); out.push({ label: c.label, value: c.value }); }
             return out;
         }
     }
 
     $('dumpBtn').addEventListener('click', () => {
-        if (!window.Module) return;
-        if (eiClassifier && classifierReady) { try { let r = eiClassifier.classify(new Float32Array(16000)); logMsg("🔬 Test: " + JSON.stringify(r).substring(0, 150)); } catch(e){} }
+        if (!window.Module) { logMsg("❌ window.Module undefined"); return; }
+        logMsg("📦 Ready=" + classifierReady);
+        if (eiClassifier && classifierReady) {
+            try { let r = eiClassifier.classify(new Float32Array(16000)); logMsg("🔬 Test: " + JSON.stringify(r).substring(0, 150)); } catch(e){}
+        }
     });
 
     function initAI() {
@@ -260,9 +288,15 @@
         let checkReady = setInterval(async () => {
             attempts++;
             if (window.Module && typeof window.Module.run_classifier === 'function') {
-                clearInterval(checkReady); eiClassifier = new EdgeImpulseClassifier(); await eiClassifier.init(); classifierReady = true;
+                clearInterval(checkReady);
+                eiClassifier = new EdgeImpulseClassifier();
+                await eiClassifier.init();
+                classifierReady = true;
                 $('ai-confidence').innerText = "AI Confidence: Listening...";
-            } else if (attempts > 50) { clearInterval(checkReady); $('ai-confidence').innerText = "AI Failed - Volume Mode Active"; }
+            } else if (attempts > 50) { 
+                clearInterval(checkReady);
+                $('ai-confidence').innerText = "AI Failed - Volume Mode Active";
+            }
         }, 100);
     }
     initAI();
@@ -273,17 +307,22 @@
         if (!results) return;
 
         $('label-scores').innerText = results.map(r => r.label + ":" + Math.round(r.value*100) + "%").join("  ");
+
         let pullScore = null;
         for (let r of results) { if (r.label.toLowerCase() === "pull") { pullScore = r.value; break; } }
         if (pullScore === null) pullScore = results[0].value; 
 
-        let pct = Math.round(pullScore * 100); let triggerLevel = threshold / 100;
+        let pct = Math.round(pullScore * 100);
+        let triggerLevel = threshold / 100;
+
         $('ai-confidence').innerText = "AI Confidence: " + pct + "%";
         $('ai-confidence').style.color = (pullScore >= triggerLevel) ? "#f00" : "#0f0";
 
         if (pullScore >= triggerLevel && isVoiceMode) {
             if (micState === 0 && armedMode) processVoiceTrigger(pct, true);
-        } else if (micState === 2 && pullScore < (triggerLevel * 0.5)) { micState = 0; $('vol-bar').style.background = "#0f0"; }
+        } else if (micState === 2 && pullScore < (triggerLevel * 0.5)) {
+            micState = 0; $('vol-bar').style.background = "#0f0";
+        }
     }
 
     // --- MIC PIPELINE ---
@@ -294,41 +333,59 @@
             audioContext = new window.AudioContext({ sampleRate: 16000 });
             if (audioContext.state === 'suspended') await audioContext.resume();
 
-            isMicActive = true; $('listenBtn').innerText = "Mute Mic 🎤"; $('listenBtn').style.background = "#dc3545";
+            isMicActive = true;
+            $('listenBtn').innerText = "Mute Mic 🎤"; $('listenBtn').style.background = "#dc3545";
 
             const source = audioContext.createMediaStreamSource(audioStream);
-            const analyser = audioContext.createAnalyser(); analyser.fftSize = 256; source.connect(analyser);
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
             const freqData = new Uint8Array(analyser.frequencyBinCount);
 
             aiProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-            source.connect(aiProcessor); aiProcessor.connect(audioContext.destination);
+            source.connect(aiProcessor);
+            aiProcessor.connect(audioContext.destination);
 
             aiProcessor.onaudioprocess = function(e) {
                 if (!isMicActive) return;
-                const rawChunk = e.inputBuffer.getChannelData(0); let chunk16k = rawChunk;
+                const rawChunk = e.inputBuffer.getChannelData(0);
+                let chunk16k = rawChunk;
+                
                 if (audioContext.sampleRate !== 16000) {
-                    const ratio = audioContext.sampleRate / 16000; chunk16k = new Float32Array(Math.round(rawChunk.length / ratio));
+                    const ratio = audioContext.sampleRate / 16000;
+                    chunk16k = new Float32Array(Math.round(rawChunk.length / ratio));
                     for (let i = 0; i < chunk16k.length; i++) chunk16k[i] = rawChunk[Math.floor(i * ratio)];
                 }
+
                 let mean = 0; for (let i = 0; i < chunk16k.length; i++) mean += chunk16k[i]; mean /= chunk16k.length;
                 let hasAudioEnergy = false;
 
                 for (let i = 0; i < chunk16k.length; i++) {
                     let rawVal = chunk16k[i] - mean;
                     if (Math.abs(rawVal) > 0.02) hasAudioEnergy = true;
+
                     if (micState !== 1) {
                         let aiVal = rawVal * 32768.0 * 2.0; 
-                        if (aiVal > 32767) aiVal = 32767; if (aiVal < -32768) aiVal = -32768; audioDataBuffer.push(aiVal);
+                        if (aiVal > 32767) aiVal = 32767; if (aiVal < -32768) aiVal = -32768;
+                        audioDataBuffer.push(aiVal);
                     }
                 }
-                if (audioDataBuffer.length > 16000) audioDataBuffer = audioDataBuffer.slice(audioDataBuffer.length - 16000);
-                if (micState === 0 && audioDataBuffer.length === 16000 && hasAudioEnergy) runAiInference(new Float32Array(audioDataBuffer));
+
+                if (audioDataBuffer.length > 16000) {
+                    audioDataBuffer = audioDataBuffer.slice(audioDataBuffer.length - 16000);
+                }
+
+                if (micState === 0 && audioDataBuffer.length === 16000 && hasAudioEnergy) {
+                    runAiInference(new Float32Array(audioDataBuffer));
+                }
             };
 
             function checkVolume() {
                 if (!isMicActive) return;
-                analyser.getByteFrequencyData(freqData); let sum = 0; for(let i=0; i<freqData.length; i++) sum += freqData[i];
-                let avgVol = sum / freqData.length; $('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
+                analyser.getByteFrequencyData(freqData);
+                let sum = 0; for(let i=0; i<freqData.length; i++) sum += freqData[i];
+                let avgVol = sum / freqData.length;
+                $('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
 
                 if (!classifierReady || !isAiEnabled) {
                     if (micState === 0 && avgVol > threshold && isVoiceMode) processVoiceTrigger(avgVol, false);
@@ -345,39 +402,63 @@
         if (audioStream) audioStream.getTracks().forEach(t => t.stop());
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
         if (animId) cancelAnimationFrame(animId);
-        audioDataBuffer = new Array(16000).fill(0); isMicActive = false; micState = 0;
-        if (resetUI) { $('listenBtn').innerText = "Turn On Mic"; $('listenBtn').style.background = "#28A745"; $('vol-bar').style.background = "#0f0"; $('vol-bar').style.width = "0%"; }
+        
+        audioDataBuffer = new Array(16000).fill(0); 
+        isMicActive = false; micState = 0;
+        
+        if (resetUI) {
+            $('listenBtn').innerText = "Turn On Mic"; $('listenBtn').style.background = "#28A745";
+            $('vol-bar').style.background = "#0f0"; $('vol-bar').style.width = "0%";
+        }
     }
 
     $('listenBtn').addEventListener('click', () => {
-        if (isMicActive || wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; stopMic(true); } else { wasMicActiveBeforeSleep = false; startMic(); }
+        if (isMicActive || wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; stopMic(true); }
+        else { wasMicActiveBeforeSleep = false; startMic(); }
     });
 
     document.addEventListener("visibilitychange", () => {
-        if (document.hidden) { if (isMicActive) { wasMicActiveBeforeSleep = true; stopMic(false); $('listenBtn').innerText = "Mic Paused 💤"; } } 
-        else { if (wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; startMic(); } }
+        if (document.hidden) {
+            if (isMicActive) { wasMicActiveBeforeSleep = true; stopMic(false); $('listenBtn').innerText = "Mic Paused 💤"; }
+        } else {
+            if (wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; startMic(); }
+        }
     });
 
     // --- UI, BLE & LOGIC ---
     $('syncBtn').addEventListener('click', () => {
-        isSyncEnabled = !isSyncEnabled; $('syncBtn').innerText = isSyncEnabled ? "Sync: ON" : "Sync: OFF"; $('syncBtn').style.background = isSyncEnabled ? "#17a2b8" : "#6c757d";
+        isSyncEnabled = !isSyncEnabled; 
+        $('syncBtn').innerText = isSyncEnabled ? "Sync: ON" : "Sync: OFF";
+        $('syncBtn').style.background = isSyncEnabled ? "#17a2b8" : "#6c757d";
     });
 
     $('vmBtn').addEventListener('click', () => {
-        isVoiceMode = !isVoiceMode; $('vmBtn').innerText = isVoiceMode ? "Mode: VOICE" : "Mode: MANUAL"; $('vmBtn').style.background = isVoiceMode ? "#9b59b6" : "#fd7e14";
-        if (!isVoiceMode) cancelMode(true); updateArmUI();
+        isVoiceMode = !isVoiceMode;
+        $('vmBtn').innerText = isVoiceMode ? "Mode: VOICE" : "Mode: MANUAL";
+        $('vmBtn').style.background = isVoiceMode ? "#9b59b6" : "#fd7e14";
+        if (!isVoiceMode) cancelMode(true);
+        updateArmUI();
         if (isBleConnected && isSyncEnabled) sendBLECmd(isVoiceMode ? "MODE:VOICE" : "MODE:MANUAL", true);
     });
 
     $('aiBtn').addEventListener('click', () => {
         isAiEnabled = !isAiEnabled;
-        if (isAiEnabled) { $('aiBtn').innerText = "AI: ON"; $('aiBtn').style.background = "#27ae60"; $('ai-confidence').innerText = classifierReady ? "AI Confidence: Listening..." : "AI: engine loading..."; } 
-        else { $('aiBtn').innerText = "AI: OFF (Vol)"; $('aiBtn').style.background = "#6c757d"; $('ai-confidence').innerText = "AI off — volume mode active"; $('label-scores').innerText = "—"; }
+        if (isAiEnabled) {
+            $('aiBtn').innerText = "AI: ON"; $('aiBtn').style.background = "#27ae60";
+            $('ai-confidence').innerText = classifierReady ? "AI Confidence: Listening..." : "AI: engine loading...";
+        } else {
+            $('aiBtn').innerText = "AI: OFF (Vol)"; $('aiBtn').style.background = "#6c757d";
+            $('ai-confidence').innerText = "AI off — volume mode active";
+            $('label-scores').innerText = "—";
+        }
     });
 
     function updateArmUI() {
         document.querySelectorAll('.arm-btn').forEach(b => b.classList.remove('active'));
-        if (!isVoiceMode) { $('arm-status').innerText = "MANUAL MODE (Tap to Fire)"; $('arm-status').style.color = "#fd7e14"; $('btn-T').innerText = "T (" + lastHouse + ")"; return; }
+        if (!isVoiceMode) {
+            $('arm-status').innerText = "MANUAL MODE (Tap to Fire)"; $('arm-status').style.color = "#fd7e14";
+            $('btn-T').innerText = "T (" + lastHouse + ")"; return;
+        }
         if (armedMode) $('btn-' + armedMode).classList.add('active');
         if (!armedMode) { $('arm-status').innerText = "SAFE / DISARMED"; $('arm-status').style.color = "#aaa"; }
         else {
@@ -391,24 +472,41 @@
     }
 
     window.cancelMode = function(fromSync = false) {
-        armedMode = null; hlStep = 0; micState = 0; $('vol-bar').style.background = "#0f0"; $('md-display').style.color = "#aaa"; updateArmUI();
+        armedMode = null; hlStep = 0; micState = 0; 
+        $('vol-bar').style.background = "#0f0"; $('md-display').style.color = "#aaa";
+        updateArmUI();
         if (!fromSync && isBleConnected && isSyncEnabled) sendBLECmd("MODE:CANCEL", true);
     };
 
     window.setMode = function(mode, fromSync = false) {
         if (!isVoiceMode && !fromSync) {
             let cmd = '';
-            if (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; } else if (mode==='D') { cmd='D1H'; hlStep=0; lastHouse='D'; } else if (mode==='DR') { cmd='D1L'; hlStep=0; lastHouse='DR'; }
-            else if (mode==='HL') { lastHouse='HL'; cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; } else if (mode==='LH') { lastHouse='LH'; cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
+            if      (mode==='H'||mode==='L') { cmd=mode; hlStep=0; lastHouse=mode; }
+            else if (mode==='D')  { cmd='D1H'; hlStep=0; lastHouse='D'; }
+            else if (mode==='DR') { cmd='D1L'; hlStep=0; lastHouse='DR'; }
+            else if (mode==='HL') { lastHouse='HL'; cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+            else if (mode==='LH') { lastHouse='LH'; cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
             else if (mode==='T') {
-                if (lastHouse==='HL') { cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; } else if (lastHouse==='LH') { cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
-                else if (lastHouse==='D') cmd='D1H'; else if (lastHouse==='DR') cmd='D1L'; else cmd=lastHouse;
+                if      (lastHouse==='HL') { cmd=(hlStep===0)?'H':'L'; hlStep=(hlStep===0)?1:0; }
+                else if (lastHouse==='LH') { cmd=(hlStep===0)?'L':'H'; hlStep=(hlStep===0)?1:0; }
+                else if (lastHouse==='D')  cmd='D1H';
+                else if (lastHouse==='DR') cmd='D1L';
+                else cmd=lastHouse;
             }
-            if (cmd) { sendBLECmd(cmd); if (isSyncEnabled) sendBLECmd("MODE:MAN_UPDATE:"+lastHouse+":"+hlStep, true); const b = $('btn-'+mode); if (b) { b.classList.add('active'); setTimeout(()=>b.classList.remove('active'),200); } updateArmUI(); }
+            if (cmd) {
+                sendBLECmd(cmd);
+                if (isSyncEnabled) sendBLECmd("MODE:MAN_UPDATE:"+lastHouse+":"+hlStep, true);
+                const b = $('btn-'+mode); if (b) { b.classList.add('active'); setTimeout(()=>b.classList.remove('active'),200); }
+                updateArmUI();
+            }
             return;
         }
-        if (!fromSync) { if (armedMode===mode) armedMode=null; else { armedMode=mode; if(mode!=='T'&&mode!=='CANCEL') lastHouse=mode; } } 
-        else { armedMode=mode; if(mode!=='T'&&mode!==null&&mode!=='CANCEL') lastHouse=mode; }
+        if (!fromSync) {
+            if (armedMode===mode) armedMode=null;
+            else { armedMode=mode; if(mode!=='T'&&mode!=='CANCEL') lastHouse=mode; }
+        } else {
+            armedMode=mode; if(mode!=='T'&&mode!==null&&mode!=='CANCEL') lastHouse=mode;
+        }
         hlStep=0; updateArmUI();
         if (!fromSync&&isBleConnected&&isSyncEnabled&&isVoiceMode) sendBLECmd(armedMode?"MODE:"+armedMode+":"+lastHouse:"MODE:CANCEL", true);
     };
@@ -419,21 +517,27 @@
             logMsg("Searching...");
             bleDev = await navigator.bluetooth.requestDevice({ filters:[{services:[SERVICE_UUID]}] });
             bleDev.addEventListener('gattserverdisconnected', () => {
-                isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; $('appTitle').innerText = "AI Puller V35"; logMsg("Disconnected.");
+                isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; 
+                $('appTitle').innerText = "AI Puller V36"; logMsg("Disconnected.");
             });
             const server = await bleDev.gatt.connect(); const service = await server.getPrimaryService(SERVICE_UUID);
             rxChar = await service.getCharacteristic(CHAR_RX_UUID); txChar = await service.getCharacteristic(CHAR_TX_UUID);
-            await txChar.startNotifications(); $('appTitle').innerText = "Connected: " + bleDev.name;
+            await txChar.startNotifications();
+            $('appTitle').innerText = "Connected: " + bleDev.name;
             txChar.addEventListener('characteristicvaluechanged', (e) => {
                 let msg = new TextDecoder('utf-8').decode(e.target.value).trim();
                 if (!msg || msg.startsWith("Err:")) return;
 
-                if (msg === "FETCHING...") { logMsg("📡 Fetching stats from Trap..."); return; }
-                if (msg.startsWith("ST1:")) { let pts = msg.substring(4).split(","); $('s-r1').innerText = pts[0]; $('s-r2').innerText = pts[1]; $('s-r3').innerText = pts[2]; return; }
-                if (msg.startsWith("ST2:")) {
-                    let p = msg.substring(4).split(":"); let cts = p[0].split(","); let rts = p[1].split(",");
-                    $('s-r4').innerText = cts[0]; $('s-r5').innerText = cts[1]; $('s-r6').innerText = cts[2];
-                    $('sel-high').value = rts[0]; $('sel-low').value = rts[1]; logMsg("✅ Relay Stats Updated!"); return;
+                // STATS RECEIVER
+                if (msg.startsWith("STATS:")) {
+                    let p = msg.split(":");
+                    let cts = p[1].split(",");
+                    let rts = p[2].split(",");
+                    
+                    for(let i=0; i<6; i++) $(`s-r${i+1}`).innerText = cts[i];
+                    $('sel-high').value = rts[0];
+                    $('sel-low').value = rts[1];
+                    return;
                 }
 
                 if (msg.startsWith("MODE:")) {
@@ -462,6 +566,7 @@
                     if(dd) { ddVal=parseFloat(dd[1]); if(ddVal>0) cacheDD=ddVal; $('val-DD').innerText=ddVal.toFixed(1)+"s"; }
                     if(md) { muteDelay=parseInt(md[1]); }
                     if(fd) { fieldId=parseInt(fd[1]); $('field-display').innerText="Field: "+fieldId; }
+                    
                     if(rd) { isRandD = (rd[1]==='1'); } if(rdd) { isRandDD = (rdd[1]==='1'); }
                     updateDModeUI();
                 }
@@ -492,7 +597,6 @@
 
         updateArmUI();
         let tLock = (dVal * 1000) + muteDelay;
-        logMsg(`💥 FIRED! Lockout: ${tLock}ms`);
         if (cmdToSend !== '') await sendBLECmd(cmdToSend);
 
         setTimeout(() => {
