@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AI Skeet Puller V47</title>
+    <title>AI Skeet Puller V48</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <script src="edge-impulse-standalone.js?v=47"></script>
+    <script src="edge-impulse-standalone.js?v=48"></script>
     <style>
         body { font-family: Arial; text-align: center; margin-top: 10px; background: #222; color: white;}
         .row { display: flex; justify-content: center; gap: 6px; margin: 6px 2%; flex-wrap: wrap;}
@@ -41,7 +41,7 @@
         <div style="font-size: 24px; cursor: pointer;" onclick="promptAdmin()">⚙️</div>
     </div>
 
-    <h2 id="appTitle" style="margin-top:0;">AI Puller V47</h2>
+    <h2 id="appTitle" style="margin-top:0;">AI Puller V48</h2>
     
     <div class="row">
         <button id="connectBtn" class="top-btn" style="background:#007BFF;color:white;">Connect BLE</button>
@@ -52,7 +52,8 @@
         <button id="syncBtn" class="top-btn" style="background:#17a2b8;color:white;">Sync: ON</button>
     </div>
     <div class="row">
-        <button id="aiBtn" class="top-btn" style="background:#27ae60;color:white;">AI: ON</button>
+        <!-- AI defaults to OFF -->
+        <button id="aiBtn" class="top-btn" style="background:#6c757d;color:white;">AI: OFF (Vol)</button>
         <button id="dumpBtn" class="top-btn" style="background:#e67e22;color:white;">🔍 Dump</button>
     </div>
     
@@ -101,7 +102,8 @@
     </div>
 
     <div id="vol-bar-container"><div id="vol-bar"></div></div>
-    <div id="ai-confidence">AI: Waiting for engine...</div>
+    <!-- Default text for AI Off -->
+    <div id="ai-confidence">AI off — volume mode active</div>
     <div id="label-scores">—</div>
 
     <label>Trigger Sensitivity / AI %: <b id="threshVal" style="color:#ffeb3b;">40</b></label><br>
@@ -114,15 +116,12 @@
     <div id="adminModal">
         <div class="admin-box">
             <h3 style="color:#00d2ff; margin-top:0;">Maintenance & Rewire</h3>
-            
             <div style="display:flex; gap:10px;">
                 <input type="text" id="newNameInput" class="admin-input" placeholder="Name (e.g. Puller F1)">
                 <input type="number" id="newFieldInput" class="admin-input" placeholder="Field #">
             </div>
             <button style="background:#28A745; width:100%; margin-top:5px; padding:10px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="saveNames()">Save Name & Field</button>
-            
             <hr style="border-color:#555; margin: 15px 0;">
-            
             <div style="display:flex; justify-content:space-between; align-items:center;">
                 <b>Relay Stats:</b>
                 <button style="background:#17a2b8; padding:5px 15px; font-weight:bold; border:none; border-radius:5px; color:white;" onclick="sendBLECmd('STATS')">Fetch</button>
@@ -135,7 +134,6 @@
                 <div class="stat-item">R5 (Pin 45): <span id="s-r5">0</span></div>
                 <div class="stat-item">R6 (Pin 46): <span id="s-r6">0</span></div>
             </div>
-
             <b>Current Wiring Map:</b>
             <div style="display:flex; justify-content:space-between; margin-top:8px; background:#222; padding:10px; border-radius:8px;">
                 <div>
@@ -172,7 +170,9 @@
     let audioContext, audioStream, animId, aiProcessor;
     let audioDataBuffer = new Array(16000).fill(0); 
     
-    let isAiEnabled = true, classifierReady = false, threshold = 40;
+    // AI Defaulted to OFF
+    let isAiEnabled = false, classifierReady = false, threshold = 40;
+    
     let isSyncEnabled = true, isVoiceMode = true;
     let armedMode = null, hlStep = 0, lastHouse = 'H';
     let dVal = 0.0, ddVal = 0.0, muteDelay = 500, fieldId = 1, isSwap = false;
@@ -182,7 +182,6 @@
 
     $('threshSlider').oninput = function() { threshold = parseInt(this.value); $('threshVal').innerText = threshold; };
 
-    // --- ADMIN LOGIC ---
     window.promptAdmin = function() {
         let pin = prompt("Enter Maintenance PIN:");
         if (pin === "3368") { 
@@ -206,74 +205,50 @@
     }
     window.saveWiring = function() {
         if (!isBleConnected) return;
-        let h = $('sel-high').value;
-        let l = $('sel-low').value;
-        sendBLECmd(`REWIRE:${h}:${l}`);
-        logMsg("⚙️ Wiring updated!");
+        let h = $('sel-high').value; let l = $('sel-low').value;
+        sendBLECmd(`REWIRE:${h}:${l}`); logMsg("⚙️ Wiring updated!");
     }
 
-    // --- 3-WAY DELAY CONTROLS ---
     window.setDMode = function(type, mode) {
         if (!isBleConnected) return;
         if (type === 'D') {
-            if (mode === 0) sendBLECmd("D0.0");
-            else { sendBLECmd("RD:" + (mode === 2 ? "1" : "0")); sendBLECmd("D" + (dVal > 0 ? dVal : cacheD).toFixed(1)); }
+            if (mode === 0) sendBLECmd("D0.0"); else { sendBLECmd("RD:" + (mode === 2 ? "1" : "0")); sendBLECmd("D" + (dVal > 0 ? dVal : cacheD).toFixed(1)); }
         } else {
-            if (mode === 0) sendBLECmd("DD0.0");
-            else { sendBLECmd("RDD:" + (mode === 2 ? "1" : "0")); sendBLECmd("DD" + (ddVal > 0 ? ddVal : cacheDD).toFixed(1)); }
+            if (mode === 0) sendBLECmd("DD0.0"); else { sendBLECmd("RDD:" + (mode === 2 ? "1" : "0")); sendBLECmd("DD" + (ddVal > 0 ? ddVal : cacheDD).toFixed(1)); }
         }
     };
 
     window.adjDelay = function(type, amt) {
         if (!isBleConnected) return;
         if (type === 'D') { 
-            let nextVal = Math.max(0, dVal + amt);
-            if (dVal > 0) cacheD = nextVal; 
-            if (dVal > 0) sendBLECmd("D" + nextVal.toFixed(1)); 
+            let n = Math.max(0, dVal + amt); if (dVal > 0) cacheD = n; if (dVal > 0) sendBLECmd("D" + n.toFixed(1)); 
         } else { 
-            let nextVal = Math.max(0, ddVal + amt);
-            if (ddVal > 0) cacheDD = nextVal; 
-            if (ddVal > 0) sendBLECmd("DD" + nextVal.toFixed(1)); 
+            let n = Math.max(0, ddVal + amt); if (ddVal > 0) cacheDD = n; if (ddVal > 0) sendBLECmd("DD" + n.toFixed(1)); 
         }
     };
 
     function updateDModeUI() {
         let mD = (dVal === 0) ? 0 : (isRandD ? 2 : 1);
-        $('mode-D-0').className = "seg-btn " + (mD===0 ? "active off" : "");
-        $('mode-D-1').className = "seg-btn " + (mD===1 ? "active on" : "");
-        $('mode-D-2').className = "seg-btn " + (mD===2 ? "active rdm" : "");
-
+        $('mode-D-0').className = "seg-btn " + (mD===0 ? "active off" : ""); $('mode-D-1').className = "seg-btn " + (mD===1 ? "active on" : ""); $('mode-D-2').className = "seg-btn " + (mD===2 ? "active rdm" : "");
         let mDD = (ddVal === 0) ? 0 : (isRandDD ? 2 : 1);
-        $('mode-DD-0').className = "seg-btn " + (mDD===0 ? "active off" : "");
-        $('mode-DD-1').className = "seg-btn " + (mDD===1 ? "active on" : "");
-        $('mode-DD-2').className = "seg-btn " + (mDD===2 ? "active rdm" : "");
+        $('mode-DD-0').className = "seg-btn " + (mDD===0 ? "active off" : ""); $('mode-DD-1').className = "seg-btn " + (mDD===1 ? "active on" : ""); $('mode-DD-2').className = "seg-btn " + (mDD===2 ? "active rdm" : "");
     }
 
-    // --- EDGE IMPULSE ---
     let eiClassifier = null; 
     class EdgeImpulseClassifier {
         _initialized = false;
         init() {
             return new Promise((resolve) => {
-                if (window.Module && typeof window.Module.run_classifier === 'function') {
-                    this._initialized = true; resolve(); return;
-                }
-                const prev = window.Module ? window.Module.onRuntimeInitialized : null;
-                window.Module = window.Module || {};
-                window.Module.onRuntimeInitialized = () => {
-                    if (typeof prev === 'function') prev();
-                    this._initialized = true; resolve();
-                };
+                if (window.Module && typeof window.Module.run_classifier === 'function') { this._initialized = true; resolve(); return; }
+                const prev = window.Module ? window.Module.onRuntimeInitialized : null; window.Module = window.Module || {};
+                window.Module.onRuntimeInitialized = () => { if (typeof prev === 'function') prev(); this._initialized = true; resolve(); };
             });
         }
         classify(rawData) {
             if (!this._initialized) throw new Error('Not initialized');
-            const ptr = Module._malloc(rawData.length * 4);
-            Module.HEAPF32.set(rawData, ptr >> 2);
-            let ret = Module.run_classifier(ptr, rawData.length, false);
-            Module._free(ptr);
-            if (ret.result !== 0) return null;
-            let out =[];
+            const ptr = Module._malloc(rawData.length * 4); Module.HEAPF32.set(rawData, ptr >> 2);
+            let ret = Module.run_classifier(ptr, rawData.length, false); Module._free(ptr);
+            if (ret.result !== 0) return null; let out =[];
             for (let i = 0; i < ret.size(); i++) { let c = ret.get(i); out.push({ label: c.label, value: c.value }); }
             return out;
         }
@@ -296,10 +271,11 @@
                 eiClassifier = new EdgeImpulseClassifier();
                 await eiClassifier.init();
                 classifierReady = true;
-                $('ai-confidence').innerText = "AI Confidence: Listening...";
+                // Only change UI text if AI was toggled ON while loading
+                if (isAiEnabled) $('ai-confidence').innerText = "AI Confidence: Listening...";
             } else if (attempts > 50) { 
                 clearInterval(checkReady);
-                $('ai-confidence').innerText = "AI Failed - Volume Mode Active";
+                if (isAiEnabled) $('ai-confidence').innerText = "AI Failed - Volume Mode Active";
             }
         }, 100);
     }
@@ -311,23 +287,19 @@
         if (!results) return;
 
         $('label-scores').innerText = results.map(r => r.label + ":" + Math.round(r.value*100) + "%").join("  ");
-
         let pullScore = null;
         for (let r of results) { if (r.label.toLowerCase() === "pull") { pullScore = r.value; break; } }
         if (pullScore === null) pullScore = results[0].value; 
 
-        let pct = Math.round(pullScore * 100);
-        let triggerLevel = threshold / 100;
-
+        let pct = Math.round(pullScore * 100); let triggerLevel = threshold / 100;
         $('ai-confidence').innerText = "AI Confidence: " + pct + "%";
         $('ai-confidence').style.color = (pullScore >= triggerLevel) ? "#f00" : "#0f0";
 
-        if (pullScore >= triggerLevel && isVoiceMode) {
-            if (micState === 0 && armedMode) processVoiceTrigger(pct, true);
+        if (micState === 0 && pullScore >= triggerLevel && isVoiceMode && armedMode) {
+            processVoiceTrigger(pct, true);
         }
     }
 
-    // --- MIC PIPELINE ---
     async function startMic() {
         try {
             audioStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -339,23 +311,17 @@
             $('listenBtn').innerText = "Mute Mic 🎤"; $('listenBtn').style.background = "#dc3545";
 
             const source = audioContext.createMediaStreamSource(audioStream);
-            const analyser = audioContext.createAnalyser();
-            analyser.fftSize = 256;
-            source.connect(analyser);
+            const analyser = audioContext.createAnalyser(); analyser.fftSize = 256; source.connect(analyser);
             const freqData = new Uint8Array(analyser.frequencyBinCount);
 
             aiProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-            source.connect(aiProcessor);
-            aiProcessor.connect(audioContext.destination);
+            source.connect(aiProcessor); aiProcessor.connect(audioContext.destination);
 
             aiProcessor.onaudioprocess = function(e) {
                 if (!isMicActive) return;
-                const rawChunk = e.inputBuffer.getChannelData(0);
-                let chunk16k = rawChunk;
-                
+                const rawChunk = e.inputBuffer.getChannelData(0); let chunk16k = rawChunk;
                 if (audioContext.sampleRate !== 16000) {
-                    const ratio = audioContext.sampleRate / 16000;
-                    chunk16k = new Float32Array(Math.round(rawChunk.length / ratio));
+                    const ratio = audioContext.sampleRate / 16000; chunk16k = new Float32Array(Math.round(rawChunk.length / ratio));
                     for (let i = 0; i < chunk16k.length; i++) chunk16k[i] = rawChunk[Math.floor(i * ratio)];
                 }
 
@@ -365,43 +331,24 @@
                 for (let i = 0; i < chunk16k.length; i++) {
                     let rawVal = chunk16k[i] - mean;
                     if (Math.abs(rawVal) > 0.02) hasAudioEnergy = true;
-
                     if (micState !== 1) {
                         let aiVal = rawVal * 32768.0 * 2.0; 
-                        if (aiVal > 32767) aiVal = 32767; if (aiVal < -32768) aiVal = -32768;
-                        audioDataBuffer.push(aiVal);
+                        if (aiVal > 32767) aiVal = 32767; if (aiVal < -32768) aiVal = -32768; audioDataBuffer.push(aiVal);
                     }
                 }
-
-                if (audioDataBuffer.length > 16000) {
-                    audioDataBuffer = audioDataBuffer.slice(audioDataBuffer.length - 16000);
-                }
-
-                if (micState === 0 && audioDataBuffer.length === 16000 && hasAudioEnergy) {
-                    runAiInference(new Float32Array(audioDataBuffer));
-                }
+                if (audioDataBuffer.length > 16000) audioDataBuffer = audioDataBuffer.slice(audioDataBuffer.length - 16000);
+                if (micState === 0 && audioDataBuffer.length === 16000 && hasAudioEnergy) runAiInference(new Float32Array(audioDataBuffer));
             };
 
             function checkVolume() {
                 if (!isMicActive) return;
-                analyser.getByteFrequencyData(freqData);
-                let sum = 0; for(let i=0; i<freqData.length; i++) sum += freqData[i];
-                let avgVol = sum / freqData.length;
-                $('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
+                analyser.getByteFrequencyData(freqData); let sum = 0; for(let i=0; i<freqData.length; i++) sum += freqData[i];
+                let avgVol = sum / freqData.length; $('vol-bar').style.width = Math.min(100, (avgVol / 1.5)) + "%";
 
-                // AI OFF Volume Fallback Trigger
                 if (!classifierReady || !isAiEnabled) {
-                    if (micState === 0 && avgVol > threshold && isVoiceMode) {
-                        processVoiceTrigger(avgVol, false);
-                    }
+                    if (micState === 0 && avgVol > threshold && isVoiceMode) processVoiceTrigger(avgVol, false);
                 }
-
-                // UNIVERSAL RESET (Runs for BOTH AI and Volume modes)
-                if (micState === 2 && avgVol < (threshold * 0.8)) { 
-                    micState = 0; 
-                    $('vol-bar').style.background = "#0f0"; 
-                }
-
+                if (micState === 2 && avgVol < (threshold * 0.8)) { micState = 0; $('vol-bar').style.background = "#0f0"; }
                 animId = requestAnimationFrame(checkVolume);
             }
             checkVolume();
@@ -413,9 +360,7 @@
         if (audioStream) audioStream.getTracks().forEach(t => t.stop());
         if (audioContext && audioContext.state !== 'closed') audioContext.close();
         if (animId) cancelAnimationFrame(animId);
-        
-        audioDataBuffer = new Array(16000).fill(0); 
-        isMicActive = false; micState = 0;
+        audioDataBuffer = new Array(16000).fill(0); isMicActive = false; micState = 0;
         
         if (resetUI) {
             $('listenBtn').innerText = "Turn On Mic"; $('listenBtn').style.background = "#28A745";
@@ -424,30 +369,28 @@
     }
 
     $('listenBtn').addEventListener('click', () => {
-        if (isMicActive || wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; stopMic(true); }
-        else { wasMicActiveBeforeSleep = false; startMic(); }
+        if (isMicActive || wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; stopMic(true); } else { wasMicActiveBeforeSleep = false; startMic(); }
     });
 
     document.addEventListener("visibilitychange", () => {
-        if (document.hidden) {
-            if (isMicActive) { wasMicActiveBeforeSleep = true; stopMic(false); $('listenBtn').innerText = "Mic Paused 💤"; }
-        } else {
-            if (wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; startMic(); }
-        }
+        if (document.hidden) { if (isMicActive) { wasMicActiveBeforeSleep = true; stopMic(false); $('listenBtn').innerText = "Mic Paused 💤"; } } 
+        else { if (wasMicActiveBeforeSleep) { wasMicActiveBeforeSleep = false; startMic(); } }
     });
 
-    // --- UI, BLE & LOGIC ---
     $('syncBtn').addEventListener('click', () => {
-        isSyncEnabled = !isSyncEnabled; 
-        $('syncBtn').innerText = isSyncEnabled ? "Sync: ON" : "Sync: OFF";
-        $('syncBtn').style.background = isSyncEnabled ? "#17a2b8" : "#6c757d";
+        isSyncEnabled = !isSyncEnabled; $('syncBtn').innerText = isSyncEnabled ? "Sync: ON" : "Sync: OFF"; $('syncBtn').style.background = isSyncEnabled ? "#17a2b8" : "#6c757d";
     });
 
     $('vmBtn').addEventListener('click', () => {
-        isVoiceMode = !isVoiceMode;
-        $('vmBtn').innerText = isVoiceMode ? "Mode: VOICE" : "Mode: MANUAL";
-        $('vmBtn').style.background = isVoiceMode ? "#9b59b6" : "#fd7e14";
-        if (!isVoiceMode) cancelMode(true);
+        isVoiceMode = !isVoiceMode; $('vmBtn').innerText = isVoiceMode ? "Mode: VOICE" : "Mode: MANUAL"; $('vmBtn').style.background = isVoiceMode ? "#9b59b6" : "#fd7e14";
+        if (!isVoiceMode) {
+            cancelMode(true);
+            if (isAiEnabled) {
+                isAiEnabled = false;
+                $('aiBtn').innerText = "AI: OFF (Vol)"; $('aiBtn').style.background = "#6c757d";
+                $('ai-confidence').innerText = "AI off — volume mode active"; $('label-scores').innerText = "—";
+            }
+        }
         updateArmUI();
         if (isBleConnected && isSyncEnabled) sendBLECmd(isVoiceMode ? "MODE:VOICE" : "MODE:MANUAL", true);
     });
@@ -522,18 +465,14 @@
         if (!fromSync&&isBleConnected&&isSyncEnabled&&isVoiceMode) sendBLECmd(armedMode?"MODE:"+armedMode+":"+lastHouse:"MODE:CANCEL", true);
     };
 
-    // BLE Connect -> Now accepts all devices to bypass iOS caching bugs natively
     $('connectBtn').addEventListener('click', async () => {
         if (isBleConnected) { if (bleDev?.gatt.connected) bleDev.gatt.disconnect(); return; }
         try {
             logMsg("Searching...");
-            bleDev = await navigator.bluetooth.requestDevice({ 
-                acceptAllDevices: true, 
-                optionalServices:[SERVICE_UUID] 
-            });
+            bleDev = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices:[SERVICE_UUID] });
             bleDev.addEventListener('gattserverdisconnected', () => {
                 isBleConnected=false; $('connectBtn').innerText="Connect BLE"; $('connectBtn').style.background="#007BFF"; 
-                $('appTitle').innerText = "AI Puller V47"; logMsg("Disconnected.");
+                $('appTitle').innerText = "AI Puller V48"; logMsg("Disconnected.");
             });
             const server = await bleDev.gatt.connect(); const service = await server.getPrimaryService(SERVICE_UUID);
             rxChar = await service.getCharacteristic(CHAR_RX_UUID); txChar = await service.getCharacteristic(CHAR_TX_UUID);
@@ -548,8 +487,7 @@
                 if (msg.startsWith("S2:")) { let pts = msg.substring(3).split(","); $('s-r3').innerText = pts[0]; $('s-r4').innerText = pts[1]; return; }
                 if (msg.startsWith("S3:")) { let pts = msg.substring(3).split(","); $('s-r5').innerText = pts[0]; $('s-r6').innerText = pts[1]; return; }
                 if (msg.startsWith("S4:")) { 
-                    let pts = msg.substring(3).split(","); 
-                    $('sel-high').value = pts[0]; $('sel-low').value = pts[1]; 
+                    let pts = msg.substring(3).split(","); $('sel-high').value = pts[0]; $('sel-low').value = pts[1]; 
                     logMsg("✅ Relay Stats Updated!"); return; 
                 }
 
@@ -597,7 +535,7 @@
             isBleConnected = true;
             $('connectBtn').innerText = "Disconnect BLE"; $('connectBtn').style.background = "#dc3545";
             setTimeout(()=>sendBLECmd("?"),500);
-        } catch(e) { logMsg("BLE Error: " + e); }
+        } catch(e) { logMsg("BLE Error: " + e.message); }
     });
 
     async function processVoiceTrigger(level, isAi) {
@@ -620,9 +558,7 @@
 
         updateArmUI();
         let tLock = (dVal * 1000) + muteDelay;
-        if (cmdToSend === 'D1H' || cmdToSend === 'D1L') {
-            tLock += (ddVal * 1000);
-        }
+        if (cmdToSend === 'D1H' || cmdToSend === 'D1L') { tLock += (ddVal * 1000); }
 
         logMsg(`💥 FIRED! (${isAi?'AI ':'Vol '}${Math.round(level)}%) Lockout: ${tLock}ms`);
         if (cmdToSend !== '') await sendBLECmd(cmdToSend);
